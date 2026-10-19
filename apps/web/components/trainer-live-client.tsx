@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { STEP_HINTS_ENABLED } from "../lib/features";
 import { io } from "socket.io-client";
 import type {
   HintApprovedRealtimePayload,
@@ -26,6 +28,9 @@ import {
 
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:4000";
 
+const statusLabel: Record<string, string> = {
+  active: "В работе", needs_help: "Нужна помощь", completed: "Завершил", stuck: "Нет активности", offline: "Не в сети"
+};
 const statusTone: Record<string, string> = {
   active: "#06b6d4",
   needs_help: "#ec4899",
@@ -49,6 +54,9 @@ type StatusFilter = "all" | TrainerParticipantView["participant"]["status"];
 type SortMode = "help_first" | "activity_desc" | "progress_desc" | "name_asc";
 
 export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail }) {
+  const searchParams = useSearchParams();
+  const participantFromLink = searchParams.get("participant");
+  const [actionError, setActionError] = useState<string | null>(null);
   const [participants, setParticipants] = useState<TrainerParticipantView[]>(initialDetail.participants);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
@@ -56,8 +64,9 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
   const [sortMode, setSortMode] = useState<SortMode>("help_first");
   const [actionableOnly, setActionableOnly] = useState(false);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(
-    initialDetail.participants[0]?.participant.id ?? null
+    participantFromLink ?? initialDetail.participants[0]?.participant.id ?? null
   );
+  const selectedProgressId = selectedParticipantId === participantFromLink ? searchParams.get("progress") ?? undefined : undefined;
   const [detail, setDetail] = useState<TrainerParticipantDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [noteBody, setNoteBody] = useState("");
@@ -76,6 +85,10 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
   const socketStatusRef = useRef(socketStatus);
 
   useEffect(() => {
+    if (participantFromLink) setSelectedParticipantId(participantFromLink);
+  }, [participantFromLink]);
+
+  useEffect(() => {
     socketStatusRef.current = socketStatus;
   }, [socketStatus]);
 
@@ -89,6 +102,10 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
       }
     };
 
+    const notify = () => {
+      window.dispatchEvent(new Event("trainer-notifications-changed"));
+      void syncSession();
+    };
     const socket = io(SOCKET_URL, {
       transports: ["websocket"],
       reconnection: true
@@ -108,6 +125,11 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
       await syncSession();
     });
 
+    for (const event of ["participant_requested_help", "participant_requested_review", "trainer_resolved_help", "participant_completed_jam", "participant_status_changed", "participant_progress_updated"]) {
+      socket.on(event, notify);
+    }
+
+    socket.on("connect_error", () => setSocketStatus("disconnected"));
     socket.on("disconnect", () => {
       setSocketStatus("disconnected");
     });
@@ -254,9 +276,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
     }, 15000);
 
     const fallbackInterval = window.setInterval(() => {
-      if (socketStatusRef.current === "disconnected") {
-        void syncSession();
-      }
+      void syncSession();
     }, 30000);
 
     return () => {
@@ -268,19 +288,25 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
   }, [initialDetail.jam.id]);
 
   useEffect(() => {
+    setNoteBody("");
+    setDetail(null);
+  }, [selectedParticipantId, selectedProgressId]);
+
+  useEffect(() => {
     if (!selectedParticipantId) {
       setDetail(null);
       setNoteBody("");
       return;
     }
 
+    let cancelled = false;
     setDetailLoading(true);
-    setNoteBody("");
-    getTrainerParticipantDetail(selectedParticipantId)
-      .then((payload) => setDetail(payload))
-      .catch(() => setDetail(null))
-      .finally(() => setDetailLoading(false));
-  }, [selectedParticipantId]);
+    getTrainerParticipantDetail(selectedParticipantId, selectedProgressId)
+      .then((payload) => { if (!cancelled) setDetail(payload); })
+      .catch(() => { if (!cancelled) setDetail(null); })
+      .finally(() => { if (!cancelled) setDetailLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedParticipantId, selectedProgressId, participants]);
 
   useEffect(() => {
     if (!selectedParticipantId) {
@@ -518,9 +544,13 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
       );
 
       if (detail?.participant.id === participantId) {
-        const refreshed = await getTrainerParticipantDetail(participantId);
+        const refreshed = await getTrainerParticipantDetail(participantId, participantId === selectedParticipantId ? selectedProgressId : undefined);
         setDetail(refreshed);
       }
+      window.dispatchEvent(new Event("trainer-notifications-changed"));
+      setActionError(null);
+    } catch {
+      setActionError("Не удалось сохранить действие. Попробуйте ещё раз.");
     } finally {
       setResolvingId(null);
     }
@@ -580,22 +610,18 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
   async function handleMarkReviewed(participantId: string) {
     setReviewingId(participantId);
     try {
-      const progress = await markTrainerParticipantReviewed(participantId);
-      setParticipants((current) =>
-        current.map((item) =>
-          item.participant.id === participantId
-            ? {
-                ...item,
-                reviewedAt: progress.reviewedAt
-              }
-            : item
-        )
-      );
+      await markTrainerParticipantReviewed(participantId, participantId === selectedParticipantId ? selectedProgressId : undefined);
+      const refreshedJam = await getTrainerJam(initialDetail.jam.id);
+      setParticipants(refreshedJam.participants);
 
       if (detail?.participant.id === participantId) {
-        const refreshed = await getTrainerParticipantDetail(participantId);
+        const refreshed = await getTrainerParticipantDetail(participantId, participantId === selectedParticipantId ? selectedProgressId : undefined);
         setDetail(refreshed);
       }
+      window.dispatchEvent(new Event("trainer-notifications-changed"));
+      setActionError(null);
+    } catch {
+      setActionError("Не удалось сохранить действие. Попробуйте ещё раз.");
     } finally {
       setReviewingId(null);
     }
@@ -609,7 +635,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
     setNotePending("create");
     try {
       await createTrainerParticipantNote(detail.participant.id, { body: noteBody.trim() });
-      const refreshed = await getTrainerParticipantDetail(detail.participant.id);
+      const refreshed = await getTrainerParticipantDetail(detail.participant.id, selectedProgressId);
       setDetail(refreshed);
       setNoteBody("");
     } finally {
@@ -625,7 +651,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
     setNotePending(noteId);
     try {
       await deleteTrainerParticipantNote(noteId);
-      const refreshed = await getTrainerParticipantDetail(detail.participant.id);
+      const refreshed = await getTrainerParticipantDetail(detail.participant.id, selectedProgressId);
       setDetail(refreshed);
     } finally {
       setNotePending(null);
@@ -637,7 +663,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
     try {
       await createTrainerParticipantNote(participantId, { body });
       if (detail?.participant.id === participantId) {
-        const refreshed = await getTrainerParticipantDetail(participantId);
+        const refreshed = await getTrainerParticipantDetail(participantId, participantId === selectedParticipantId ? selectedProgressId : undefined);
         setDetail(refreshed);
       }
       setSelectedParticipantId(participantId);
@@ -654,6 +680,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
 
   return (
     <>
+      {actionError ? <p role="alert" style={{ color: "var(--danger)" }}>{actionError}</p> : null}
       <section className="card stack">
         <div className="button-row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
           <div className="button-row" style={{ flexWrap: "wrap" }}>
@@ -687,7 +714,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
           <div className="button-row">
             <span className="pill">В очереди: {helpQueue.length}</span>
             <button className="button-secondary" onClick={handleCopyHelpQueue}>
-              {helpCopied ? "Скопировано" : "Скопировать help queue"}
+              {helpCopied ? "Скопировано" : "Скопировать очередь помощи"}
             </button>
           </div>
         </div>
@@ -699,18 +726,18 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                 <div className="button-row" style={{ justifyContent: "space-between" }}>
                   <strong>{item.participant.displayName}</strong>
                   <span className="pill" style={{ color: statusTone[item.participant.status] ?? "#fff" }}>
-                    {item.participant.status}
+                    {statusLabel[item.participant.status] ?? item.participant.status}
                   </span>
                 </div>
                 <p className="subtle">
                   {item.gameTitle ?? "Игра не выбрана"} · {item.currentStepTitle ?? "Этап не определён"}
                 </p>
                 <div className="button-row">
-                  <span className="pill">Подсказки: {item.hintsOpenedCount}</span>
+                  {STEP_HINTS_ENABLED ? <span className="pill">Подсказки: {item.hintsOpenedCount}</span> : null}
                   <span className="pill">
                     Активность: {new Date(item.lastActivityAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
                   </span>
-                  {pendingHintRequests[item.participant.id] ? (
+                  {STEP_HINTS_ENABLED && pendingHintRequests[item.participant.id] ? (
                     <span className="pill" style={{ color: "#f59e0b" }}>⚡ Запрос подсказки</span>
                   ) : null}
                 </div>
@@ -718,7 +745,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                   <button className="button-secondary" onClick={() => setSelectedParticipantId(item.participant.id)}>
                     Открыть
                   </button>
-                  {pendingHintRequests[item.participant.id] ? (
+                  {STEP_HINTS_ENABLED && pendingHintRequests[item.participant.id] ? (
                     <button
                       className="button"
                       onClick={() => void handleApproveHint(item.participant.id)}
@@ -783,7 +810,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                   {item.gameTitle ?? "Игра не выбрана"} · {item.progressPercent}% готово
                 </p>
                 <div className="button-row">
-                  <span className="pill">Подсказки: {item.hintsOpenedCount}</span>
+                  {STEP_HINTS_ENABLED ? <span className="pill">Подсказки: {item.hintsOpenedCount}</span> : null}
                   <span className="pill">
                     Финал: {new Date(item.lastActivityAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
                   </span>
@@ -840,7 +867,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                   {item.gameTitle ?? "Игра не выбрана"} · {item.currentStepTitle ?? "Этап не определён"}
                 </p>
                 <div className="button-row">
-                  <span className="pill">Подсказки: {item.hintsOpenedCount}</span>
+                  {STEP_HINTS_ENABLED ? <span className="pill">Подсказки: {item.hintsOpenedCount}</span> : null}
                   <span className="pill">
                     Последняя активность: {new Date(item.lastActivityAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
                   </span>
@@ -853,7 +880,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
         )}
       </section>
 
-      <section className="split" style={{ gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 0.8fr)" }}>
+      <section className="trainer-live-layout">
         <div className="card stack">
           <div className="button-row" style={{ justifyContent: "space-between" }}>
             <div>
@@ -910,14 +937,15 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
             {actionableOnly ? <span className="pill">нужна помощь + зависли + ждут разбора</span> : null}
           </div>
 
-          <table className="table">
+          <div className="trainer-table-scroll" role="region" aria-label="Ученики и их прогресс" tabIndex={0}>
+          <table className="table trainer-participants-table">
             <thead>
               <tr>
                 <th>Имя</th>
                 <th>Игра</th>
                 <th>Этап</th>
                 <th>Прогресс</th>
-                <th>Подсказки</th>
+                {STEP_HINTS_ENABLED ? <th>Подсказки</th> : null}
                 <th>Статус</th>
                 <th>Разбор</th>
                 <th>Активность</th>
@@ -940,10 +968,10 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                   <td style={{ minWidth: 180 }}>
                     <div className="progress"><span style={{ width: `${item.progressPercent}%` }} /></div>
                   </td>
-                  <td>{item.hintsOpenedCount}</td>
+                  {STEP_HINTS_ENABLED ? <td>{item.hintsOpenedCount}</td> : null}
                   <td>
                     <span className="pill" style={{ color: statusTone[item.participant.status] ?? "#fff" }}>
-                      {item.participant.status}
+                      {statusLabel[item.participant.status] ?? item.participant.status}
                     </span>
                   </td>
                   <td>
@@ -972,7 +1000,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                           {resolvingId === item.participant.id ? "Обрабатываю..." : "Помощь обработана"}
                         </button>
                       ) : null}
-                      {pendingHintRequests[item.participant.id] ? (
+                      {STEP_HINTS_ENABLED && pendingHintRequests[item.participant.id] ? (
                         <button
                           className="button"
                           onClick={() => void handleApproveHint(item.participant.id)}
@@ -986,6 +1014,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
               ))}
             </tbody>
           </table>
+          </div>
         </div>
 
         <div className="card stack">
@@ -995,14 +1024,14 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
             <>
               <strong>{detail.participant.displayName}</strong>
               <div className="button-row">
-                <span className="pill" style={{ color: statusTone[detail.participant.status] ?? "#fff" }}>{detail.participant.status}</span>
+                <span className="pill" style={{ color: statusTone[detail.participant.status] ?? "#fff" }}>{statusLabel[detail.participant.status] ?? detail.participant.status}</span>
                 <span className="pill">{detail.participant.avatar}</span>
                 {detail.currentVersionLabel ? <span className="pill">{detail.currentVersionLabel}</span> : null}
               </div>
               <p className="subtle">Код входа: {detail.jam.joinCode}</p>
               {detail.currentGameTitle ? <p className="subtle">Текущая игра: {detail.currentGameTitle}</p> : null}
 
-              {detail.participant.status === "completed" ? (
+              {detail.progress?.isCompleted ? (
                 <div className="card accent-card stack" style={{ padding: 16 }}>
                   <div className="eyebrow">ГОТОВО К РАЗБОРУ</div>
                   <strong>Участник готов показать результат</strong>
@@ -1065,9 +1094,9 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                       </p>
                     </div>
                     <div className="card" style={{ padding: 14 }}>
-                      <strong>Подсказки / помощь</strong>
+                      <strong>{STEP_HINTS_ENABLED ? "Подсказки / помощь" : "Помощь тренера"}</strong>
                       <p className="subtle">
-                        {detail.resultSummary.hintsOpenedCount} hints, {detail.resultSummary.helpRequestsCount} help
+                        {STEP_HINTS_ENABLED ? `Подсказок: ${detail.resultSummary.hintsOpenedCount}, ` : ""}Запросов помощи: {detail.resultSummary.helpRequestsCount}
                       </p>
                     </div>
                   </div>
@@ -1145,7 +1174,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                       <span className="pill">{step.status}</span>
                     </div>
                     <div className="button-row">
-                      <span className="pill">Подсказки: {step.hintsOpenedCount}</span>
+                      {STEP_HINTS_ENABLED ? <span className="pill">Подсказки: {step.hintsOpenedCount}</span> : null}
                       <span className="pill">Последняя подсказка: L{step.lastHintLevelOpened}</span>
                     </div>
                     <div className="button-row">

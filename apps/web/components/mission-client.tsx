@@ -5,10 +5,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import type { GameStep, GameVersion, ParticipantProgress, ParticipantStepProgress, StepHint } from "@game-game/shared";
-import { completeParticipantStep, getParticipantProgress, requestParticipantHelp, requestParticipantHintOpen } from "../lib/api";
+import { completeParticipantStep, getParticipantProgress, requestParticipantHelp, requestParticipantHintOpen, requestParticipantReview } from "../lib/api";
 import { ChildAttemptHistoryPanel } from "./child-attempt-history-panel";
 import { saveChildAttempt } from "./child-attempt-history";
 import { clearChildSession, readChildSession } from "./child-session-sync";
+
+import { STEP_HINTS_ENABLED } from "../lib/features";
 
 const GDEVELOP_URL = "https://gdevelop.tirskix.space/";
 
@@ -121,7 +123,7 @@ function useCountUp(target: number, duration = 600) {
 
 function renderMedia(url: string, type: "image" | "video", label: string) {
   if (type === "image") {
-    return <img src={url} alt={label} style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 8 }} />;
+    return <img src={url} alt={label} style={{ width: "100%", height: "auto", objectFit: "contain", borderRadius: 8 }} />;
   }
   return (
     <video style={{ width: "100%", maxHeight: 200, borderRadius: 8 }} controls preload="metadata">
@@ -258,6 +260,7 @@ function DescriptionWithHints({
       {parts.map((part, i) => {
         const match = part.match(/^<hint-block[^>]*>([\s\S]*?)<\/hint-block>$/i);
         if (match) {
+          if (!STEP_HINTS_ENABLED) return null;
           hintIndex += 1;
           const idx = hintIndex;
           return (
@@ -338,7 +341,10 @@ export function MissionClient({
   const [stepProgress, setStepProgress] = useState<ParticipantStepProgress[]>(
     ensureLocalStepProgress(version, initialStepProgress, participantId, version.id)
   );
-  const [pending, setPending] = useState<"complete" | "hint" | "help" | null>(null);
+  const [pending, setPending] = useState<"complete" | "hint" | "help" | "review" | null>(null);
+  const [reviewRequestedAt, setReviewRequestedAt] = useState(initialProgress.reviewRequestedAt);
+  const [reviewedAt, setReviewedAt] = useState(initialProgress.reviewedAt);
+  const actionInFlight = useRef(false);
   const [hintPending, setHintPending] = useState(false); // waiting for trainer approval
   const [error, setError] = useState<string | null>(null);
   const [successStep, setSuccessStep] = useState<GameStep | null>(null);
@@ -425,8 +431,45 @@ export function MissionClient({
     attemptSavedRef.current = true;
   }, [childSession?.joinCode, helpRequestsCount, isCompleted, participantId, totalHintsOpened, version, xpTotal]);
 
+  useEffect(() => {
+    if (!helpRequested && !reviewRequestedAt) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const sync = async () => {
+      try {
+        const fresh = await getParticipantProgress(participantId);
+        if (!cancelled && !actionInFlight.current && fresh.progress?.gameVersionId === version.id) {
+          setStepProgress(ensureLocalStepProgress(version, fresh.stepProgress ?? [], participantId, version.id));
+          setReviewRequestedAt(fresh.progress.reviewRequestedAt);
+          setReviewedAt(fresh.progress.reviewedAt);
+        }
+      } catch { /* Keep confirmed server state and retry on the next tick. */ }
+      finally { if (!cancelled) timer = setTimeout(() => void sync(), 10000); }
+    };
+    timer = setTimeout(() => void sync(), 10000);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [helpRequested, reviewRequestedAt, participantId, version]);
+
+  async function handleRequestReview() {
+    if (actionInFlight.current || reviewRequestedAt || reviewedAt) return;
+    actionInFlight.current = true;
+    setPending("review");
+    setError(null);
+    try {
+      const progress = await requestParticipantReview(participantId);
+      setReviewRequestedAt(progress.reviewRequestedAt);
+      setReviewedAt(progress.reviewedAt);
+    } catch {
+      setError("Не удалось уведомить тренера. Попробуй ещё раз.");
+    } finally {
+      actionInFlight.current = false;
+      setPending(null);
+    }
+  }
+
   async function handleCompleteStep() {
-    if (!currentStep) return;
+    if (!currentStep || actionInFlight.current) return;
+    actionInFlight.current = true;
     setPending("complete");
     setError(null);
     try {
@@ -454,6 +497,7 @@ export function MissionClient({
     } catch {
       setError("Не удалось отметить этап выполненным.");
     } finally {
+      actionInFlight.current = false;
       setPending(null);
     }
   }
@@ -495,12 +539,14 @@ export function MissionClient({
     } catch {
       setError("Не удалось запросить подсказку.");
     } finally {
+      actionInFlight.current = false;
       setPending(null);
     }
   }
 
   async function handleNeedHelp() {
-    if (!currentStep) return;
+    if (!currentStep || actionInFlight.current || helpRequested) return;
+    actionInFlight.current = true;
     setPending("help");
     setError(null);
     try {
@@ -515,6 +561,7 @@ export function MissionClient({
     } catch {
       setError("Не удалось отправить запрос помощи.");
     } finally {
+      actionInFlight.current = false;
       setPending(null);
     }
   }
@@ -563,7 +610,7 @@ export function MissionClient({
 
   return (
     <>
-      <div style={gridStyle}>
+      <div className="mission-workspace" style={gridStyle}>
         {/* ── LEFT: Mission info ── */}
         <div style={{
           position: "relative",
@@ -610,7 +657,7 @@ export function MissionClient({
           </div>
 
           {/* Scrollable content */}
-          <div style={{ overflowY: "auto", flex: 1, padding: 16 }}>
+          <div className="mission-instructions" style={{ overflowY: "auto", flex: 1, minWidth: 0, padding: 16 }}>
             {isCompleted ? (
               /* ── FINAL SCREEN ── */
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -626,7 +673,7 @@ export function MissionClient({
                   {[
                     ["Этапов", steps.length],
                     ["XP", xpTotal],
-                    ["Подсказок", totalHintsOpened],
+                    ...(STEP_HINTS_ENABLED ? [["Подсказок", totalHintsOpened]] : []),
                     ["Запросов помощи", helpRequestsCount]
                   ].map(([label, value]) => (
                     <div key={label as string} className="card" style={{ padding: 12, textAlign: "center" }}>
@@ -643,9 +690,12 @@ export function MissionClient({
                 ) : null}
                 <ChildAttemptHistoryPanel title="История миссий" />
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <Link className="button" href={joinHref as Route} style={{ textAlign: "center" }}>
-                    Показать тренеру
-                  </Link>
+                  <button className="button" onClick={() => void handleRequestReview()}
+                    disabled={pending !== null || Boolean(reviewRequestedAt) || Boolean(reviewedAt)}>
+                    {reviewedAt ? "Тренер проверил результат" : reviewRequestedAt ? "Запрос отправлен тренеру" : pending === "review" ? "Отправляю…" : "Показать тренеру"}
+                  </button>
+                  {reviewRequestedAt && !reviewedAt ? <p role="status">Тренер получил запрос на проверку. Результат остаётся здесь.</p> : null}
+                  {error ? <p role="alert" style={{ color: "var(--danger)" }}>{error}</p> : null}
                   <Link className="button-secondary" href={`/participant/${participantId}/jams` as Route} style={{ textAlign: "center" }}>
                     Попробовать ещё
                   </Link>
@@ -717,7 +767,7 @@ export function MissionClient({
                     {pending === "complete" ? "Сохраняю..." : "✓ Я сделал!"}
                   </button>
                   {/* Legacy DB hints — show button only when step has no inline hint-blocks */}
-                  {inlineHintCount === 0 && totalAvailableHints > 0 ? (
+                  {STEP_HINTS_ENABLED && inlineHintCount === 0 && totalAvailableHints > 0 ? (
                     <div className="button-row">
                       <button
                         className="button-secondary"
@@ -734,13 +784,13 @@ export function MissionClient({
                               : `Подсказка ${openedHintLevel + 1} из ${totalAvailableHints}`}
                       </button>
                       <button className="button-secondary" style={{ flex: 1, justifyContent: "center", fontSize: 13 }} disabled={pending !== null || helpRequested} onClick={handleNeedHelp}>
-                        {helpRequested ? "Тренер уведомлён" : "Нужна помощь"}
+                        {pending === "help" ? "Отправляю…" : helpRequested ? "Запрос помощи отправлен" : "Нужна помощь"}
                       </button>
                     </div>
                   ) : (
                     <div className="button-row">
                       <button className="button-secondary" style={{ flex: 1, justifyContent: "center", fontSize: 13 }} disabled={pending !== null || helpRequested} onClick={handleNeedHelp}>
-                        {helpRequested ? "Тренер уведомлён" : "Нужна помощь"}
+                        {pending === "help" ? "Отправляю…" : helpRequested ? "Запрос помощи отправлен" : "Нужна помощь"}
                       </button>
                     </div>
                   )}
@@ -749,7 +799,7 @@ export function MissionClient({
                 {error ? <p style={{ color: "var(--danger)", margin: 0, fontSize: 13 }}>{error}</p> : null}
 
                 {/* Legacy DB hints — shown at bottom only when no inline hint-blocks */}
-                {inlineHintCount === 0 && openedHints.length > 0 ? (
+                {STEP_HINTS_ENABLED && inlineHintCount === 0 && openedHints.length > 0 ? (
                   <div>
                     <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", marginBottom: 8, letterSpacing: "0.05em" }}>
                       ПОДСКАЗКИ ({openedHints.length} из {totalAvailableHints})

@@ -185,6 +185,7 @@ export interface ParticipantProgress {
   startedAt: string;
   completedAt?: string;
   reviewedAt?: string;
+  reviewRequestedAt?: string;
 }
 
 export interface ParticipantStepProgress {
@@ -385,6 +386,7 @@ export interface TrainerParticipantView {
   hintsOpenedCount: number;
   lastActivityAt: string;
   reviewedAt?: string;
+  reviewRequestedAt?: string;
 }
 
 export interface RealtimeEvent<T = unknown> {
@@ -392,6 +394,7 @@ export interface RealtimeEvent<T = unknown> {
     | "participant_joined"
     | "participant_progress_updated"
     | "participant_status_changed"
+    | "participant_requested_review"
     | "participant_requested_help"
     | "participant_completed_jam"
     | "trainer_resolved_help"
@@ -429,4 +432,17 @@ export interface HintApprovedRealtimePayload {
   participantId: string;
   stepId: string;
   hintLevel: number;
+}
+
+/** Outstanding work, shared by trainers in the current organization. */
+export interface TrainerNotification {
+  id: string;
+  kind: "help" | "review";
+  progressId?: string;
+  participantId: string;
+  participantName: string;
+  jamId: string;
+  jamTitle: string;
+  stepTitle?: string;
+  createdAt: string;
 }

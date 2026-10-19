@@ -352,8 +352,8 @@ export class AppService {
     return this.progressRepository.getJamAnalytics(jamId);
   }
 
-  getParticipant(participantId: string) {
-    return this.progressRepository.getParticipantDetail(participantId);
+  getParticipant(participantId: string, progressId?: string) {
+    return this.progressRepository.getParticipantDetail(participantId, progressId);
   }
 
   async resolveHelp(participantId: string) {
@@ -368,9 +368,9 @@ export class AppService {
     return { ok: true };
   }
 
-  async markParticipantReviewed(participantId: string) {
+  async markParticipantReviewed(participantId: string, progressId?: string) {
     const jamId = await this.sessionRepository.getParticipantJam(participantId);
-    const progress = await this.progressRepository.markReviewed(participantId);
+    const progress = await this.progressRepository.markReviewed(participantId, progressId);
     this.emitToJam(jamId, {
       type: "participant_status_changed",
       payload: { participantId, progress },
@@ -457,6 +457,19 @@ export class AppService {
       emittedAt: nowIso()
     });
     return hint;
+  }
+
+  listTrainerNotifications(organizationId: string) {
+    return this.progressRepository.listTrainerNotifications(organizationId);
+  }
+
+  async requestReview(participantId: string) {
+    const progress = await this.progressRepository.requestReview(participantId);
+    const jamId = await this.sessionRepository.getParticipantJam(participantId);
+    this.emitToJam(jamId, {
+      type: "participant_requested_review", payload: { participantId, progress }, emittedAt: nowIso()
+    });
+    return progress;
   }
 
   async needHelp(stepId: string, participantId: string) {

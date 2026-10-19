@@ -285,3 +285,14 @@ Release checklist:
 Deployment runbook:
 
 - [DEPLOY.md](C:\Users\direc\Downloads\game_game\docs\DEPLOY.md)
+
+
+## Trainer notification updates
+
+- The bell is available throughout `/trainer`. It shows outstanding help requests and explicit result-review requests for the active organization.
+- Requests are server-backed. Opening a notification navigates to the participant; the request is cleared by resolving help or marking the result reviewed, rather than by opening the bell.
+- The bell refreshes every 10 seconds and on window focus; live-session events trigger an immediate refresh. It retains the last successful list during connection errors.
+- `Показать тренеру` now saves `ParticipantProgress.reviewRequestedAt` and keeps the child on the result screen. Repeated submissions are idempotent. A pending review can still be opened after the child selects another game.
+- Before deploying this change, apply the `20261019_trainer_review_requests` migration using `npx prisma migrate deploy` in `apps/api`, then regenerate the Prisma client/build the applications.
+- Step hints are hidden from the student and trainer UI by default. Existing content and authoring tools are preserved. Set `NEXT_PUBLIC_ENABLE_STEP_HINTS=true` **at web build time** to restore the hint interface.
+- Run `npm run test:notifications` for the notification regression suite (repository state tests and real Nest HTTP routes using in-memory Prisma test doubles). CI runs the same suite after the API build.

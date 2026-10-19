@@ -62,7 +62,8 @@ async function buildRequestError(response: Response) {
   let message = `Request failed: ${response.status}`;
 
   try {
-    const json = (await response.json()) as { message?: string | string[] };
+    const body = (await response.json()) as { message?: string | string[]; error?: { message?: string | string[] } };
+    const json = body.error ?? body;
     if (Array.isArray(json.message)) {
       message = json.message.join(", ");
     } else if (typeof json.message === "string") {
@@ -534,8 +535,8 @@ export async function attachTrainerJamGame(jamId: string, payload: AttachJamGame
   return await postJson(`/trainer/jams/${jamId}/games`, payload);
 }
 
-export async function getTrainerParticipantDetail(id: string): Promise<TrainerParticipantDetail> {
-  return await getJson(`/trainer/participants/${id}`);
+export async function getTrainerParticipantDetail(id: string, progressId?: string): Promise<TrainerParticipantDetail> {
+  return await getJson(`/trainer/participants/${id}${progressId ? `?progress=${encodeURIComponent(progressId)}` : ""}`);
 }
 
 export async function getTrainerJamAnalytics(id: string): Promise<JamAnalytics> {
@@ -546,8 +547,8 @@ export async function resolveParticipantHelp(participantId: string) {
   return await postJson(`/trainer/participants/${participantId}/resolve-help`);
 }
 
-export async function markTrainerParticipantReviewed(participantId: string): Promise<ParticipantProgress> {
-  return await postJson(`/trainer/participants/${participantId}/mark-reviewed`);
+export async function markTrainerParticipantReviewed(participantId: string, progressId?: string): Promise<ParticipantProgress> {
+  return await postJson(`/trainer/participants/${participantId}/mark-reviewed${progressId ? `?progress=${encodeURIComponent(progressId)}` : ""}`);
 }
 
 export async function createTrainerParticipantNote(participantId: string, payload: CreateTrainerParticipantNoteDto): Promise<TrainerParticipantNote> {
@@ -570,4 +571,12 @@ export async function deleteTrainerParticipantNote(noteId: string) {
 
   const json = (await response.json()) as { data: { ok?: boolean } };
   return json.data;
+}
+
+export async function getTrainerNotifications(): Promise<import("@game-game/shared").TrainerNotification[]> {
+  return getJson("/trainer/notifications");
+}
+
+export async function requestParticipantReview(participantId: string): Promise<ParticipantProgress> {
+  return postJson(`/public/participants/${participantId}/request-review`);
 }

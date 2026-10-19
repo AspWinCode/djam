@@ -16,6 +16,7 @@
     "backup:db": "powershell -ExecutionPolicy Bypass -File .\\scripts\\backup-postgres.ps1",
     "restore:db": "powershell -ExecutionPolicy Bypass -File .\\scripts\\restore-postgres.ps1",
     "backup:media": "powershell -ExecutionPolicy Bypass -File .\\scripts\\backup-media.ps1",
-    "release:check": "cmd /c .\\scripts\\release-check.cmd"
+    "release:check": "cmd /c .\\scripts\\release-check.cmd",
+    "test:notifications": "npm --workspace @game-game/api run build && node --test tests/trainer-notifications.test.mjs"
   }
 }

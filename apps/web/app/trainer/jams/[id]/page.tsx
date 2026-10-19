@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { TrainerLiveClient } from "../../../../components/trainer-live-client";
 import { TrainerSessionControlsClient } from "../../../../components/trainer-session-controls-client";
 import { getTrainerPublishedGameVersions, getTrainerJam } from "../../../../lib/api";
@@ -78,7 +79,7 @@ export default async function TrainerJamPage({ params }: { params: Promise<{ id:
           )}
         </section>
 
-        <TrainerLiveClient initialDetail={detail} />
+        <Suspense fallback={<p>Загружаю участников…</p>}><TrainerLiveClient initialDetail={detail} /></Suspense>
       </div>
     </main>
   );

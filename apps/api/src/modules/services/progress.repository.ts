@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service.js";
 import type {
   GameStep,
@@ -13,7 +13,8 @@ import type {
   StepHint,
   TrainerParticipantNote,
   TrainerParticipantTimelineEvent,
-  TrainerParticipantView
+  TrainerParticipantView,
+  TrainerNotification
 } from "@game-game/shared";
 
 @Injectable()
@@ -375,6 +376,10 @@ export class ProgressRepository {
       throw new NotFoundException("Progress not found");
     }
 
+    if (progress.isCompleted || progress.currentStepId !== stepId) {
+      throw new BadRequestException("Помощь можно запросить только на текущем этапе");
+    }
+
     const stepProgress = await this.prisma.participantStepProgress.findFirst({
       where: {
         participantId,
@@ -399,12 +404,62 @@ export class ProgressRepository {
         where: { id: stepProgress.id },
         data: {
           needsHelpFlag: true,
-          needsHelpAt: new Date()
+          needsHelpAt: stepProgress.needsHelpFlag ? stepProgress.needsHelpAt : new Date(),
+          helpResolvedAt: null
         }
       });
     });
 
     return this.toParticipantStepProgress(updated);
+  }
+
+  async requestReview(participantId: string): Promise<ParticipantProgress> {
+    const progress = await this.prisma.participantProgress.findFirst({
+      where: { participantId }, orderBy: { startedAt: "desc" }
+    });
+    if (!progress) throw new NotFoundException("Прогресс не найден");
+    if (!progress.isCompleted) throw new BadRequestException("Сначала заверши все этапы игры");
+    // Conditional update keeps retries and simultaneous clicks idempotent.
+    await this.prisma.participantProgress.updateMany({
+      where: { id: progress.id, reviewRequestedAt: null, reviewedAt: null },
+      data: { reviewRequestedAt: new Date() }
+    });
+    const updated = await this.prisma.participantProgress.findUniqueOrThrow({ where: { id: progress.id } });
+    return this.toParticipantProgress(updated);
+  }
+
+  async listTrainerNotifications(organizationId: string): Promise<TrainerNotification[]> {
+    const participants = await this.prisma.participant.findMany({
+      where: { jam: { organizationId, status: { in: ["active", "completed"] } } },
+      include: {
+        jam: true,
+        progress: { orderBy: { startedAt: "desc" }, include: { gameVersion: true } },
+        stepProgress: { where: { needsHelpFlag: true }, orderBy: { needsHelpAt: "desc" } }
+      }
+    });
+    const notifications: TrainerNotification[] = [];
+    for (const participant of participants) {
+      const progress = participant.progress[0];
+      if (!progress) continue;
+      const base = {
+        participantId: participant.id, participantName: participant.displayName,
+        jamId: participant.jamId, jamTitle: participant.jam.title
+      };
+      const help = participant.stepProgress.find(step => step.gameVersionId === progress.gameVersionId);
+      if (help && !progress.isCompleted) {
+        const snapshot = progress.gameVersion.snapshotJson as unknown as { steps: GameStep[] };
+        notifications.push({ ...base, id: `help:${help.id}`, kind: "help",
+          stepTitle: snapshot.steps.find(step => step.id === help.stepId)?.title,
+          createdAt: (help.needsHelpAt ?? participant.lastSeenAt).toISOString() });
+      }
+      for (const attempt of participant.progress) {
+        if (attempt.isCompleted && attempt.reviewRequestedAt && !attempt.reviewedAt) {
+          notifications.push({ ...base, id: `review:${attempt.id}`, kind: "review", progressId: attempt.id,
+            createdAt: attempt.reviewRequestedAt.toISOString() });
+        }
+      }
+    }
+    return notifications.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   async resolveHelp(participantId: string): Promise<void> {
@@ -438,16 +493,16 @@ export class ProgressRepository {
     });
   }
 
-  async markReviewed(participantId: string): Promise<ParticipantProgress> {
+  async markReviewed(participantId: string, progressId?: string): Promise<ParticipantProgress> {
     const progress = await this.prisma.participantProgress.findFirst({
-      where: { participantId },
+      where: { participantId, ...(progressId ? { id: progressId } : {}) },
       orderBy: { startedAt: "desc" }
     });
     if (!progress) {
       throw new NotFoundException("Progress not found");
     }
     if (!progress.isCompleted) {
-      throw new Error("Only completed missions can be reviewed");
+      throw new BadRequestException("Проверить можно только завершённую игру");
     }
 
     const updated = await this.prisma.participantProgress.update({
@@ -583,7 +638,7 @@ export class ProgressRepository {
     };
   }
 
-  async getParticipantDetail(participantId: string) {
+  async getParticipantDetail(participantId: string, progressId?: string) {
     const participant = await this.prisma.participant.findUnique({
       where: { id: participantId },
       include: {
@@ -595,9 +650,11 @@ export class ProgressRepository {
     }
 
     const progress = await this.prisma.participantProgress.findFirst({
-      where: { participantId },
+      where: { participantId, ...(progressId ? { id: progressId } : {}) },
       orderBy: { startedAt: "desc" }
     });
+
+    if (progressId && !progress) throw new NotFoundException("Результат не найден");
 
     const stepItems = progress
       ? await this.prisma.participantStepProgress.findMany({
@@ -790,7 +847,8 @@ export class ProgressRepository {
       ? await this.prisma.participantProgress.findMany({
           where: {
             participantId: { in: participantIds }
-          }
+          },
+          orderBy: { startedAt: "desc" }
         })
       : [];
 
@@ -815,7 +873,7 @@ export class ProgressRepository {
       const version = progress ? versions.find((item) => item.id === progress.gameVersionId) : undefined;
       const snapshot = version?.snapshotJson as { game: { title: string }; steps: GameStep[] } | undefined;
       const step = snapshot?.steps.find((item) => item.id === progress?.currentStepId);
-      const participantStepItems = stepProgressItems.filter((item) => item.participantId === participant.id);
+      const participantStepItems = stepProgressItems.filter((item) => item.participantId === participant.id && item.gameVersionId === progress?.gameVersionId);
       const derivedStatus = this.deriveParticipantStatus(participant.status, participant.lastSeenAt);
 
       return {
@@ -828,7 +886,8 @@ export class ProgressRepository {
         progressPercent: progress ? Math.round((progress.completedStepsCount / progress.totalStepsCount) * 100) : 0,
         hintsOpenedCount: participantStepItems.reduce((sum, item) => sum + item.hintsOpenedCount, 0),
         lastActivityAt: participant.lastSeenAt.toISOString(),
-        reviewedAt: progress?.reviewedAt?.toISOString()
+        reviewedAt: progress?.reviewedAt?.toISOString(),
+        reviewRequestedAt: progress?.reviewRequestedAt?.toISOString()
       };
     });
   }
@@ -886,6 +945,7 @@ export class ProgressRepository {
     startedAt: Date;
     completedAt: Date | null;
     reviewedAt: Date | null;
+    reviewRequestedAt?: Date | null;
   }): ParticipantProgress {
     return {
       id: progress.id,
@@ -898,7 +958,8 @@ export class ProgressRepository {
       isCompleted: progress.isCompleted,
       startedAt: progress.startedAt.toISOString(),
       completedAt: progress.completedAt?.toISOString(),
-      reviewedAt: progress.reviewedAt?.toISOString()
+      reviewedAt: progress.reviewedAt?.toISOString(),
+      reviewRequestedAt: progress.reviewRequestedAt?.toISOString()
     };
   }
 

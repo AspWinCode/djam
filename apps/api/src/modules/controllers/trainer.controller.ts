@@ -1,8 +1,9 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Req } from "@nestjs/common";
+import { BadRequestException, NotFoundException, Body, Controller, Delete, Get, Param, Post, Req, Query } from "@nestjs/common";
 import type { AuthRequest } from "../../common/auth.types.js";
 import { Roles } from "../../common/roles.decorator.js";
 import { AttachJamGameDtoClass, CreateJamDtoClass, CreateTrainerParticipantNoteDtoClass } from "../dto/trainer.dto.js";
 import { AppService } from "../services/app.service.js";
+import { PrismaService } from "../../prisma/prisma.service.js";
 import { AuditLogService } from "../services/audit-log.service.js";
 
 function requireOrganizationId(request: AuthRequest) {
@@ -18,8 +19,16 @@ function requireOrganizationId(request: AuthRequest) {
 export class TrainerController {
   constructor(
     private readonly appService: AppService,
-    private readonly auditLog: AuditLogService
+    private readonly auditLog: AuditLogService,
+    private readonly prisma: PrismaService
   ) {}
+
+  private async requireParticipantAccess(request: AuthRequest, participantId: string) {
+    const participant = await this.prisma.participant.findFirst({
+      where: { id: participantId, jam: { organizationId: requireOrganizationId(request) } }
+    });
+    if (!participant) throw new NotFoundException("Участник не найден");
+  }
 
   @Post("jams")
   async createJam(@Req() request: AuthRequest, @Body() body: CreateJamDtoClass) {
@@ -37,6 +46,11 @@ export class TrainerController {
   @Get("jams")
   async listJams(@Req() request: AuthRequest) {
     return { data: await this.appService.listJams(requireOrganizationId(request)) };
+  }
+
+  @Get("notifications")
+  async notifications(@Req() request: AuthRequest) {
+    return { data: await this.appService.listTrainerNotifications(requireOrganizationId(request)) };
   }
 
   @Get("game-versions")
@@ -99,22 +113,26 @@ export class TrainerController {
   }
 
   @Get("jams/:id/participants")
-  async participants(@Param("id") id: string) {
+  async participants(@Req() request: AuthRequest, @Param("id") id: string) {
+    await this.appService.getJam(id, requireOrganizationId(request));
     return { data: await this.appService.getJamParticipants(id) };
   }
 
   @Get("jams/:id/analytics")
-  async analytics(@Param("id") id: string) {
+  async analytics(@Req() request: AuthRequest, @Param("id") id: string) {
+    await this.appService.getJam(id, requireOrganizationId(request));
     return { data: await this.appService.getJamAnalytics(id) };
   }
 
   @Get("participants/:id")
-  async participant(@Param("id") id: string) {
-    return { data: await this.appService.getParticipant(id) };
+  async participant(@Req() request: AuthRequest, @Param("id") id: string, @Query("progress") progressId?: string) {
+    await this.requireParticipantAccess(request, id);
+    return { data: await this.appService.getParticipant(id, progressId) };
   }
 
   @Post("participants/:id/resolve-help")
   async resolveHelp(@Req() request: AuthRequest, @Param("id") id: string) {
+    await this.requireParticipantAccess(request, id);
     const result = await this.appService.resolveHelp(id);
     await this.auditLog.log({
       action: "trainer.participant.resolve_help",
@@ -126,8 +144,9 @@ export class TrainerController {
   }
 
   @Post("participants/:id/mark-reviewed")
-  async markReviewed(@Req() request: AuthRequest, @Param("id") id: string) {
-    const progress = await this.appService.markParticipantReviewed(id);
+  async markReviewed(@Req() request: AuthRequest, @Param("id") id: string, @Query("progress") progressId?: string) {
+    await this.requireParticipantAccess(request, id);
+    const progress = await this.appService.markParticipantReviewed(id, progressId);
     await this.auditLog.log({
       action: "trainer.participant.mark_reviewed",
       ...this.auditLog.actorFromRequest(request),
@@ -140,6 +159,7 @@ export class TrainerController {
 
   @Post("participants/:id/notes")
   async createNote(@Req() request: AuthRequest, @Param("id") id: string, @Body() body: CreateTrainerParticipantNoteDtoClass) {
+    await this.requireParticipantAccess(request, id);
     const note = await this.appService.createTrainerParticipantNote(id, body, {
       id: request.user!.id,
       displayName: request.user!.displayName

@@ -365,6 +365,7 @@ model ParticipantProgress {
   startedAt           DateTime  @default(now()) @map("started_at")
   completedAt         DateTime? @map("completed_at")
   reviewedAt          DateTime? @map("reviewed_at")
+  reviewRequestedAt   DateTime? @map("review_requested_at")
 
   participant Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
   gameVersion GameVersion @relation(fields: [gameVersionId], references: [id], onDelete: Restrict)

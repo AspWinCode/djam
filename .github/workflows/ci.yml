@@ -89,6 +89,9 @@ jobs:
       - name: Build API
         run: npm --workspace @game-game/api run build
 
+      - name: Trainer notification regression tests
+        run: node --test tests/trainer-notifications.test.mjs
+
       - name: Build web
         run: npm --workspace @game-game/web run build
 

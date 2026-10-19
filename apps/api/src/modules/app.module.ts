@@ -30,24 +30,6 @@ import { SessionRepository } from "./services/session.repository.js";
           name: "default",
           ttl: 60_000,
           limit: 600
-        },
-        {
-          name: "auth",
-          ttl: 60_000,
-          limit: 30,
-          blockDuration: 120_000
-        },
-        {
-          name: "join",
-          ttl: 60_000,
-          limit: 12,
-          blockDuration: 60_000
-        },
-        {
-          name: "child-actions",
-          ttl: 60_000,
-          limit: 40,
-          blockDuration: 30_000
         }
       ]
     })
