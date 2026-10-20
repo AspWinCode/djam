@@ -468,7 +468,11 @@ export async function getPublicJam(joinCode: string): Promise<PublicJamPayload> 
 }
 
 export async function getParticipantProgress(participantId: string): Promise<ParticipantMissionPayload> {
-  return await getJson(`/public/progress/${participantId}`);
+  return await getJson(`/public/progress/${participantId}`, {
+    headers: {
+      "x-participant-id": participantId
+    }
+  });
 }
 
 export async function getPublicStatus(): Promise<PublicStatusPayload> {
@@ -480,11 +484,19 @@ export async function joinJam(joinCode: string, payload: JoinSessionDto): Promis
 }
 
 export async function listParticipantGames(participantId: string): Promise<GameVersion[]> {
-  return await getJson(`/public/participants/${participantId}/games`);
+  return await getJson(`/public/participants/${participantId}/games`, {
+    headers: {
+      "x-participant-id": participantId
+    }
+  });
 }
 
 export async function selectParticipantGame(participantId: string, gameVersionId: string) {
-  return await postJson(`/public/participants/${participantId}/select-game`, { gameVersionId });
+  return await postJson(`/public/participants/${participantId}/select-game`, { gameVersionId }, {
+    headers: {
+      "x-participant-id": participantId
+    }
+  });
 }
 
 export async function completeParticipantStep(stepId: string, participantId: string): Promise<ParticipantProgress> {
@@ -600,5 +612,9 @@ export async function getTrainerNotifications(): Promise<import("@game-game/shar
 }
 
 export async function requestParticipantReview(participantId: string): Promise<ParticipantProgress> {
-  return postJson(`/public/participants/${participantId}/request-review`);
+  return postJson(`/public/participants/${participantId}/request-review`, undefined, {
+    headers: {
+      "x-participant-id": participantId
+    }
+  });
 }

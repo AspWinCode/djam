@@ -4,6 +4,13 @@ import { TrainerSessionControlsClient } from "../../../../components/trainer-ses
 import { getTrainerPublishedGameVersions, getTrainerJam } from "../../../../lib/api";
 import { getServerCookieHeader, requireServerRole } from "../../../../lib/server-auth";
 
+const jamStatusLabel: Record<string, string> = {
+  planned: "Запланирован",
+  active: "Идёт сейчас",
+  completed: "Завершён",
+  cancelled: "Отменён"
+};
+
 export default async function TrainerJamPage({ params }: { params: Promise<{ id: string }> }) {
   await requireServerRole(["trainer", "admin"], "/trainer");
   const cookieHeader = await getServerCookieHeader();
@@ -30,7 +37,7 @@ export default async function TrainerJamPage({ params }: { params: Promise<{ id:
             <span className="pill">
               Код: <span className="code">{detail.jam.joinCode}</span>
             </span>
-            <span className="pill">Статус: {detail.jam.status}</span>
+            <span className="pill">Статус: {jamStatusLabel[detail.jam.status] ?? detail.jam.status}</span>
             <span className="pill">Игр: {detail.jamGames.length}</span>
             {detail.jam.startedAt ? <span className="pill">Запущен: {new Date(detail.jam.startedAt).toLocaleString("ru-RU")}</span> : null}
           </div>

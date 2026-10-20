@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Headers, Param, Post, Req } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
+import { ParticipantScoped } from "../../common/participant-scoped.decorator.js";
 import type { AuthRequest } from "../../common/auth.types.js";
 import { JoinJamDtoClass, SelectGameDtoClass } from "../dto/public.dto.js";
 import { AuditLogService } from "../services/audit-log.service.js";
@@ -37,12 +38,14 @@ export class PublicController {
   }
 
   @Get("participants/:participantId/games")
+  @ParticipantScoped()
   async listParticipantGames(@Param("participantId") participantId: string) {
     return { data: await this.appService.listParticipantGames(participantId) };
   }
 
   @Post("participants/:participantId/select-game")
   @Throttle({ default: { limit: 120, ttl: 60_000, blockDuration: 30_000 } })
+  @ParticipantScoped()
   async selectGame(@Req() request: AuthRequest, @Param("participantId") participantId: string, @Body() body: SelectGameDtoClass) {
     const payload = await this.appService.selectGame(participantId, body);
     await this.auditLog.log({
@@ -56,17 +59,20 @@ export class PublicController {
 
   @Post("participants/:participantId/request-review")
   @Throttle({ default: { limit: 40, ttl: 60_000 } })
+  @ParticipantScoped()
   async requestReview(@Param("participantId") participantId: string) {
     return { data: await this.appService.requestReview(participantId) };
   }
 
   @Get("progress/:participantId")
+  @ParticipantScoped()
   async getProgress(@Param("participantId") participantId: string) {
     return { data: await this.appService.getProgress(participantId) };
   }
 
   @Post("steps/:stepId/complete")
   @Throttle({ default: { limit: 120, ttl: 60_000, blockDuration: 30_000 } })
+  @ParticipantScoped()
   async completeStep(
     @Req() request: AuthRequest,
     @Param("stepId") stepId: string,
@@ -85,6 +91,7 @@ export class PublicController {
 
   @Post("steps/:stepId/open-hint")
   @Throttle({ default: { limit: 120, ttl: 60_000, blockDuration: 30_000 } })
+  @ParticipantScoped()
   async openHint(@Req() request: AuthRequest, @Param("stepId") stepId: string, @Headers("x-participant-id") participantId: string) {
     const hint = await this.appService.openHint(stepId, participantId);
     await this.auditLog.log({
@@ -99,6 +106,7 @@ export class PublicController {
 
   @Post("steps/:stepId/request-hint")
   @Throttle({ default: { limit: 120, ttl: 60_000, blockDuration: 30_000 } })
+  @ParticipantScoped()
   async requestHint(@Req() request: AuthRequest, @Param("stepId") stepId: string, @Headers("x-participant-id") participantId: string) {
     const result = await this.appService.requestHint(stepId, participantId);
     await this.auditLog.log({
@@ -112,6 +120,7 @@ export class PublicController {
 
   @Post("steps/:stepId/need-help")
   @Throttle({ default: { limit: 120, ttl: 60_000, blockDuration: 30_000 } })
+  @ParticipantScoped()
   async needHelp(@Req() request: AuthRequest, @Param("stepId") stepId: string, @Headers("x-participant-id") participantId: string) {
     const stepProgress = await this.appService.needHelp(stepId, participantId);
     await this.auditLog.log({

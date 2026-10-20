@@ -56,17 +56,46 @@ function Invoke-FileUpload {
   param(
     [string]$Url,
     [string]$FilePath,
-    $CookieHeader
+    [string]$CookieHeader
   )
 
-  $output = & curl.exe -sS -X POST -H "Origin: http://localhost:3000" -b $CookieHeader -F "file=@$FilePath;type=text/plain" $Url
-  $parsed = $output | ConvertFrom-Json
+  # Shelling out to curl.exe only works on Windows and breaks on the Linux CI
+  # runner (no curl.exe there, and PowerShell Core has no curl alias to fall
+  # back on). System.Net.Http.HttpClient does a real multipart/form-data POST
+  # and works identically under Windows PowerShell 5.1 and PowerShell Core.
+  Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue
 
-  if (-not $parsed.data) {
-    throw "Upload failed: $output"
+  # HttpClient's default handler owns its own CookieContainer and silently drops a
+  # manually-set Cookie header unless cookie handling is turned off on the handler.
+  $handler = [System.Net.Http.HttpClientHandler]::new()
+  $handler.UseCookies = $false
+  $client = [System.Net.Http.HttpClient]::new($handler)
+  try {
+    $client.DefaultRequestHeaders.Add("Origin", "http://localhost:3000")
+    $client.DefaultRequestHeaders.Add("Cookie", $CookieHeader)
+
+    $content = [System.Net.Http.MultipartFormDataContent]::new()
+    $fileBytes = [System.IO.File]::ReadAllBytes($FilePath)
+    $fileContent = [System.Net.Http.ByteArrayContent]::new($fileBytes)
+    $fileContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse("text/plain")
+    $content.Add($fileContent, "file", [System.IO.Path]::GetFileName($FilePath))
+
+    $response = $client.PostAsync($Url, $content).GetAwaiter().GetResult()
+    $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+
+    if (-not $response.IsSuccessStatusCode) {
+      throw "Upload failed ($($response.StatusCode)): $body"
+    }
+
+    $parsed = $body | ConvertFrom-Json
+    if (-not $parsed.data) {
+      throw "Upload failed: $body"
+    }
+
+    return $parsed.data
+  } finally {
+    $client.Dispose()
   }
-
-  return $parsed.data
 }
 
 Write-Host "Smoke MVP starting..."

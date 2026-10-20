@@ -494,9 +494,14 @@ export class ProgressRepository {
   }
 
   async markReviewed(participantId: string, progressId?: string): Promise<ParticipantProgress> {
+    // Without an explicit progressId (e.g. a direct "mark reviewed" click rather than a
+    // notification deep link), only consider completed attempts — never the participant's
+    // newest progress row, which may already be a fresh, unfinished game started after the
+    // one actually awaiting review. Prefer whichever completed attempt most recently had a
+    // review requested.
     const progress = await this.prisma.participantProgress.findFirst({
-      where: { participantId, ...(progressId ? { id: progressId } : {}) },
-      orderBy: { startedAt: "desc" }
+      where: { participantId, ...(progressId ? { id: progressId } : { isCompleted: true }) },
+      orderBy: progressId ? { startedAt: "desc" } : [{ reviewRequestedAt: "desc" }, { completedAt: "desc" }]
     });
     if (!progress) {
       throw new NotFoundException("Progress not found");
