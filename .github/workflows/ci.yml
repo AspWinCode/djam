@@ -26,19 +26,22 @@ jobs:
           --health-timeout=5s
           --health-retries=5
 
-      minio:
-        image: quay.io/minio/minio:latest
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
+      # MinIO pulled its images from Docker Hub and quay.io now refuses anonymous pulls
+      # (both minio/minio and quay.io/minio/minio return "unauthorized"/"access denied" as
+      # of October 2026), so build-and-verify can no longer use it as the S3-compatible
+      # service for CI. adobe/s3mock is a real, actively maintained S3-API-compatible mock
+      # (Apache 2.0, freely pullable) — verified locally: CreateBucket, HeadBucket, PutObject
+      # and GetObject all round-trip correctly against it, which is all the app's upload
+      # pipeline needs. Pinned to a specific release, not :latest, for reproducibility.
+      s3mock:
+        image: adobe/s3mock:4.11.0
         ports:
-          - 9000:9000
+          - 9000:9090
         options: >-
-          --health-cmd="curl -f http://localhost:9000/minio/health/live || exit 1"
+          --health-cmd="wget -q -O /dev/null http://localhost:9090/ || exit 1"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
-        command: server /data --console-address ":9001"
 
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/game_game?schema=public
@@ -48,8 +51,10 @@ jobs:
       S3_ENDPOINT: http://localhost:9000
       S3_REGION: us-east-1
       S3_BUCKET: game-game-media
-      S3_ACCESS_KEY_ID: minioadmin
-      S3_SECRET_ACCESS_KEY: minioadmin
+      # s3mock does not validate signatures/credentials; these just need to be present
+      # so the AWS SDK client has something to sign requests with.
+      S3_ACCESS_KEY_ID: s3mock
+      S3_SECRET_ACCESS_KEY: s3mock
       S3_FORCE_PATH_STYLE: "true"
       S3_PUBLIC_BASE_URL: http://localhost:9000/game-game-media
       S3_CREATE_BUCKET_IF_MISSING: "true"
