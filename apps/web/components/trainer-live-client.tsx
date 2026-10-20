@@ -887,16 +887,21 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
               <div className="eyebrow">Живая таблица</div>
               <h2 className="section-title" style={{ fontSize: 28, marginTop: 10 }}>Участники в сессии</h2>
             </div>
-            <div className="button-row">
-              <span className="pill">комната сокета: {initialDetail.jam.id}</span>
-              <span className="pill">сокет: {socketStatus}</span>
-              <span className="pill">участников в комнате: {socketRoomSize}</span>
-              {lastRealtimeAt ? (
-                <span className="pill">
-                  realtime: {new Date(lastRealtimeAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
-                </span>
-              ) : null}
-            </div>
+            <details className="connection-diagnostics">
+              <summary className="pill" style={{ cursor: "pointer" }}>
+                {socketStatus === "connected" ? "● Онлайн" : socketStatus === "connecting" ? "○ Подключение…" : "○ Нет связи, обновляю по таймеру"}
+              </summary>
+              <div className="button-row" style={{ marginTop: 8 }}>
+                <span className="pill">комната сокета: {initialDetail.jam.id}</span>
+                <span className="pill">сокет: {socketStatus}</span>
+                <span className="pill">участников в комнате: {socketRoomSize}</span>
+                {lastRealtimeAt ? (
+                  <span className="pill">
+                    realtime: {new Date(lastRealtimeAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                ) : null}
+              </div>
+            </details>
           </div>
 
           <div className="button-row" style={{ flexWrap: "wrap" }}>
@@ -1119,7 +1124,11 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                   </div>
                   <div className="card" style={{ padding: 14 }}>
                     <strong>Итог для тренера</strong>
-                    <p className="subtle" style={{ marginBottom: 0 }}>{detail.resultSummary.summaryText}</p>
+                    <p className="subtle" style={{ marginBottom: 0 }}>
+                      {STEP_HINTS_ENABLED
+                        ? detail.resultSummary.summaryText
+                        : detail.resultSummary.summaryText.split(" | ").filter(part => !/hints?$/i.test(part)).join(" | ")}
+                    </p>
                   </div>
                 </div>
               ) : null}

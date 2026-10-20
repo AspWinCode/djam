@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service.js";
 import { createJoinCode } from "../../common/utils.js";
+import { ProgressRepository } from "./progress.repository.js";
 import type {
   AttachJamGameDto,
   CreateJamDto,
@@ -9,13 +10,15 @@ import type {
   PublicJamPayload,
   Jam,
   JamDetail,
-  JamGame,
-  TrainerParticipantView
+  JamGame
 } from "@game-game/shared";
 
 @Injectable()
 export class SessionRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly progressRepository: ProgressRepository
+  ) {}
 
   async isEnabled() {
     if (!process.env.DATABASE_URL) {
@@ -120,9 +123,6 @@ export class SessionRepository {
       include: {
         jamGames: {
           orderBy: { orderIndex: "asc" }
-        },
-        participants: {
-          orderBy: { joinedAt: "asc" }
         }
       }
     });
@@ -134,7 +134,7 @@ export class SessionRepository {
     return {
       jam: this.toJam(jam),
       jamGames: jam.jamGames.map((item) => this.toJamGame(item)),
-      participants: jam.participants.map((participant) => this.toTrainerParticipantView(participant))
+      participants: await this.progressRepository.getTrainerParticipants(id)
     };
   }
 
@@ -185,15 +185,6 @@ export class SessionRepository {
     });
 
     return this.toJamGame(relation);
-  }
-
-  async getJamParticipants(jamId: string): Promise<TrainerParticipantView[]> {
-    const participants = await this.prisma.participant.findMany({
-      where: { jamId },
-      orderBy: { joinedAt: "asc" }
-    });
-
-    return participants.map((participant) => this.toTrainerParticipantView(participant));
   }
 
   async getParticipant(participantId: string) {
@@ -395,25 +386,6 @@ export class SessionRepository {
       status: participant.status,
       joinedAt: participant.joinedAt.toISOString(),
       lastSeenAt: participant.lastSeenAt.toISOString()
-    };
-  }
-
-  private toTrainerParticipantView(participant: {
-    id: string;
-    jamId: string;
-    displayName: string;
-    avatar: string;
-    status: "active" | "stuck" | "needs_help" | "completed" | "offline";
-    joinedAt: Date;
-    lastSeenAt: Date;
-  }): TrainerParticipantView {
-    return {
-      participant: this.toParticipant(participant),
-      gameTitle: undefined,
-      currentStepTitle: undefined,
-      progressPercent: 0,
-      hintsOpenedCount: 0,
-      lastActivityAt: participant.lastSeenAt.toISOString()
     };
   }
 }

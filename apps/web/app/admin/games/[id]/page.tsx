@@ -53,6 +53,10 @@ export default async function AdminGamePage({ params }: { params: Promise<{ id: 
     {
       label: "Есть итоговое медиа хотя бы у одного этапа",
       passed: detail.steps.some((step) => step.resultImageUrl || step.resultVideoUrl)
+    },
+    {
+      label: "У каждого этапа есть хотя бы одна подсказка (необязательно)",
+      passed: detail.steps.length > 0 && detail.steps.every((step) => step.hints.length > 0)
     }
   ];
 

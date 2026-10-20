@@ -222,7 +222,7 @@ export function AdminStepCardClient({
   }
 
   async function handleAddHint() {
-    if (!canEdit || step.hints.length >= 3) {
+    if (!canEdit || step.hints.length >= 9) {
       return;
     }
 

@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
-import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
+import { ThrottlerModule } from "@nestjs/throttler";
+import { AppThrottlerGuard } from "../common/app-throttler.guard.js";
 import { HttpExceptionLoggingFilter } from "../common/http-exception.filter.js";
 import { HttpLoggingInterceptor } from "../common/http-logging.interceptor.js";
 import { RolesGuard } from "../common/roles.guard.js";
@@ -55,7 +56,7 @@ import { SessionRepository } from "./services/session.repository.js";
     },
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard
+      useClass: AppThrottlerGuard
     },
     {
       provide: APP_GUARD,

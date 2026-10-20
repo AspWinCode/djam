@@ -121,6 +121,13 @@ function useCountUp(target: number, duration = 600) {
   return display;
 }
 
+function getActionErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && (err as Error & { status?: number }).status === 429) {
+    return err.message || "Слишком много запросов. Подождите немного и повторите попытку.";
+  }
+  return fallback;
+}
+
 function renderMedia(url: string, type: "image" | "video", label: string) {
   if (type === "image") {
     return <img src={url} alt={label} style={{ width: "100%", height: "auto", objectFit: "contain", borderRadius: 8 }} />;
@@ -459,8 +466,8 @@ export function MissionClient({
       const progress = await requestParticipantReview(participantId);
       setReviewRequestedAt(progress.reviewRequestedAt);
       setReviewedAt(progress.reviewedAt);
-    } catch {
-      setError("Не удалось уведомить тренера. Попробуй ещё раз.");
+    } catch (requestReviewError) {
+      setError(getActionErrorMessage(requestReviewError, "Не удалось уведомить тренера. Попробуй ещё раз."));
     } finally {
       actionInFlight.current = false;
       setPending(null);
@@ -494,8 +501,8 @@ export function MissionClient({
         setTimeout(() => setFloatingXp((cur) => cur?.id === id ? null : cur), 1500);
       }
       setSuccessStep(finishedStep);
-    } catch {
-      setError("Не удалось отметить этап выполненным.");
+    } catch (completeError) {
+      setError(getActionErrorMessage(completeError, "Не удалось отметить этап выполненным."));
     } finally {
       actionInFlight.current = false;
       setPending(null);
@@ -503,7 +510,8 @@ export function MissionClient({
   }
 
   async function handleRequestHint() {
-    if (!currentStep || hintPending) return;
+    if (!currentStep || hintPending || actionInFlight.current) return;
+    actionInFlight.current = true;
     setPending("hint");
     setError(null);
     try {
@@ -534,10 +542,16 @@ export function MissionClient({
               )
             );
           }
-        } catch { /* ignore poll errors */ }
+        } catch (pollError) {
+          // Back off instead of hammering the API every 3s while rate-limited.
+          const retryAfterSec = (pollError as { retryAfterSec?: number })?.retryAfterSec;
+          if (typeof retryAfterSec === "number") {
+            attempts += Math.ceil(retryAfterSec / 3);
+          }
+        }
       }, 3000);
-    } catch {
-      setError("Не удалось запросить подсказку.");
+    } catch (hintError) {
+      setError(getActionErrorMessage(hintError, "Не удалось запросить подсказку."));
     } finally {
       actionInFlight.current = false;
       setPending(null);
@@ -558,8 +572,8 @@ export function MissionClient({
             : item
         )
       );
-    } catch {
-      setError("Не удалось отправить запрос помощи.");
+    } catch (needHelpError) {
+      setError(getActionErrorMessage(needHelpError, "Не удалось отправить запрос помощи."));
     } finally {
       actionInFlight.current = false;
       setPending(null);

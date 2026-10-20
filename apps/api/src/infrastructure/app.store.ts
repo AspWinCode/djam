@@ -153,12 +153,6 @@ export class AppStore {
       throw new Error("Cannot publish a game with untitled steps");
     }
 
-    for (const step of steps) {
-      if (this.getStepHints(step.id).length < 3) {
-        throw new Error("Each step requires at least 3 hints for MVP");
-      }
-    }
-
     const versionNumber =
       Math.max(
         0,

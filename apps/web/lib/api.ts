@@ -60,11 +60,13 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api";
 
 async function buildRequestError(response: Response) {
   let message = `Request failed: ${response.status}`;
+  let fieldErrors: string[] | undefined;
 
   try {
     const body = (await response.json()) as { message?: string | string[]; error?: { message?: string | string[] } };
     const json = body.error ?? body;
     if (Array.isArray(json.message)) {
+      fieldErrors = json.message;
       message = json.message.join(", ");
     } else if (typeof json.message === "string") {
       message = json.message;
@@ -73,8 +75,28 @@ async function buildRequestError(response: Response) {
     // Ignore malformed error payloads and keep fallback message.
   }
 
+  if (response.status === 429) {
+    // NestJS's ThrottlerGuard emits a per-bucket header (e.g. "Retry-After-join")
+    // when a named throttler is used, not always a bare "Retry-After".
+    let retryAfterHeader = response.headers.get("Retry-After");
+    if (!retryAfterHeader) {
+      response.headers.forEach((value, key) => {
+        if (!retryAfterHeader && key.toLowerCase().startsWith("retry-after")) {
+          retryAfterHeader = value;
+        }
+      });
+    }
+    const retryAfterSec = retryAfterHeader ? Number(retryAfterHeader) : undefined;
+    message = retryAfterSec && Number.isFinite(retryAfterSec)
+      ? `Слишком много запросов. Попробуйте снова через ${retryAfterSec} сек.`
+      : "Слишком много запросов. Подождите немного и повторите попытку.";
+    const error = new Error(message);
+    Object.assign(error, { status: 429, retryAfterSec });
+    return error;
+  }
+
   const error = new Error(message);
-  Object.assign(error, { status: response.status });
+  Object.assign(error, { status: response.status, fieldErrors });
   return error;
 }
 

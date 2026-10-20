@@ -754,21 +754,24 @@ export class ContentRepository {
         throw new Error("Each step must grant XP greater than 0");
       }
 
-      if (step.hints.length < 3) {
-        throw new Error("Each step requires at least 3 hints for MVP");
-      }
+      // Hints are optional. If a step has any, their levels must still be
+      // valid: unique and numbered sequentially starting from L1.
+      if (step.hints.length > 0) {
+        const levels = step.hints.map((hint) => hint.level);
+        const uniqueLevels = new Set(levels);
+        if (uniqueLevels.size !== levels.length) {
+          throw new Error(`Step "${step.title}" has duplicate hint levels`);
+        }
 
-      const levels = step.hints
-        .map((hint) => hint.level)
-        .sort((left, right) => left - right)
-        .join(",");
+        const sortedLevels = [...levels].sort((left, right) => left - right);
+        const isSequential = sortedLevels.every((level, index) => level === index + 1);
+        if (!isSequential) {
+          throw new Error(`Step "${step.title}" hints must be numbered sequentially starting from L1`);
+        }
 
-      if (levels !== "1,2,3") {
-        throw new Error("Each step must have sequential hints L1, L2 and L3");
-      }
-
-      if (step.hints.some((hint) => !hint.text.trim())) {
-        throw new Error("Each hint requires text");
+        if (step.hints.some((hint) => !hint.text.trim())) {
+          throw new Error(`Step "${step.title}" has a hint without text`);
+        }
       }
     }
     const versionNumber = Math.max(0, ...game.versions.map((version) => version.versionNumber)) + 1;
