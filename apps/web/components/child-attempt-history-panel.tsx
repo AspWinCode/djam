@@ -8,6 +8,7 @@ import {
   type ChildAttemptRecord,
   readChildAttemptHistory
 } from "./child-attempt-history";
+import { STEP_HINTS_ENABLED } from "../lib/features";
 
 function formatAttemptDate(value: string) {
   const date = new Date(value);
@@ -34,8 +35,8 @@ function AttemptRow({ item }: { item: ChildAttemptRecord }) {
         <span className="pill">{item.xpTotal} XP</span>
       </div>
       <div className="button-row" style={{ marginTop: 12 }}>
-        <span className="pill">Подсказок: {item.hintsOpenedCount}</span>
-        <span className="pill">Help: {item.helpRequestsCount}</span>
+        {STEP_HINTS_ENABLED ? <span className="pill">Подсказок: {item.hintsOpenedCount}</span> : null}
+        <span className="pill">Запросов помощи: {item.helpRequestsCount}</span>
         <Link className="button-secondary" href={`/join/${item.joinCode}` as Route}>
           Повторить
         </Link>

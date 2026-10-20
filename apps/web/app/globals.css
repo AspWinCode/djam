@@ -833,7 +833,8 @@ textarea:focus-visible {
 .trainer-live-layout .button-row { flex-wrap: wrap; }
 .trainer-table-scroll { max-width: 100%; overflow-x: auto; border-radius: 8px; }
 .trainer-participants-table { min-width: 850px; }
-.trainer-participants-table th, .trainer-participants-table td { overflow-wrap: anywhere; }
+.trainer-participants-table th, .trainer-participants-table td { white-space: nowrap; }
+.trainer-participants-table .pill { white-space: nowrap; }
 .trainer-participants-table td:nth-child(-n+3) { min-width: 100px; max-width: 190px; }
 .trainer-participants-table td:last-child { min-width: 180px; }
 .trainer-toolbar { display: flex; justify-content: flex-end; padding-top: 16px; position: relative; z-index: 30; }

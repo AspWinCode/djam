@@ -6,8 +6,16 @@ import { useEffect, useMemo, useState } from "react";
 import type { Route } from "next";
 import type { GameVersion, Jam } from "@game-game/shared";
 import { attachTrainerJamGame, createTrainerJam, getTrainerPublishedGameVersions } from "../lib/api";
+import { STEP_HINTS_ENABLED } from "../lib/features";
 
 type HistoryFilter = "all" | "completed" | "cancelled";
+
+const jamStatusLabel: Record<string, string> = {
+  planned: "Запланирован",
+  active: "Идёт сейчас",
+  completed: "Завершён",
+  cancelled: "Отменён"
+};
 
 function getVersionTitle(version: GameVersion) {
   const snapshot = version.snapshotJson as { game?: { title?: string } } | undefined;
@@ -256,7 +264,7 @@ function SessionGroup({
               </p>
             </div>
             <div className="button-row">
-              <span className="pill">{session.status}</span>
+              <span className="pill">{jamStatusLabel[session.status] ?? session.status}</span>
             </div>
           </div>
 
@@ -282,9 +290,10 @@ function SessionGroup({
                 </p>
               </div>
               <div className="card" style={{ padding: 14 }}>
-                <strong>Подсказки / помощь</strong>
+                <strong>{STEP_HINTS_ENABLED ? "Подсказки / помощь" : "Помощь"}</strong>
                 <p className="subtle" style={{ marginBottom: 0 }}>
-                  {session.archiveSummary.hintsOpenedCount} подсказок, {session.archiveSummary.helpRequestsCount} запросов помощи
+                  {STEP_HINTS_ENABLED ? `${session.archiveSummary.hintsOpenedCount} подсказок, ` : ""}
+                  {session.archiveSummary.helpRequestsCount} запросов помощи
                 </p>
               </div>
             </div>

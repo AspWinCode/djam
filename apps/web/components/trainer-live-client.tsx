@@ -31,6 +31,9 @@ const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:4000"
 const statusLabel: Record<string, string> = {
   active: "В работе", needs_help: "Нужна помощь", completed: "Завершил", stuck: "Нет активности", offline: "Не в сети"
 };
+const stepStatusLabel: Record<string, string> = {
+  locked: "Заблокирован", active: "В работе", completed: "Завершён"
+};
 const statusTone: Record<string, string> = {
   active: "#06b6d4",
   needs_help: "#ec4899",
@@ -48,6 +51,17 @@ const timelineTone: Record<string, string> = {
   help_resolved: "#22c55e",
   step_completed: "#84cc16",
   completed_jam: "#22c55e"
+};
+
+const timelineLabel: Record<string, string> = {
+  joined: "Присоединился",
+  selected_jam: "Выбрал игру",
+  step_started: "Начал этап",
+  hint_opened: "Открыл подсказку",
+  requested_help: "Запросил помощь",
+  help_resolved: "Помощь обработана",
+  step_completed: "Завершил этап",
+  completed_jam: "Завершил игру"
 };
 
 type StatusFilter = "all" | TrainerParticipantView["participant"]["status"];
@@ -394,7 +408,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
           item.gameTitle ?? "no-jam",
           item.currentStepTitle ?? "no-step",
           `${item.progressPercent}%`,
-          `hints:${item.hintsOpenedCount}`,
+          ...(STEP_HINTS_ENABLED ? [`hints:${item.hintsOpenedCount}`] : []),
           `reviewed:${item.reviewedAt ? "yes" : "no"}`,
           `last:${new Date(item.lastActivityAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`
         ].join(" | ")
@@ -418,7 +432,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
         item.gameTitle ?? "no-jam",
         item.currentStepTitle ?? "no-step",
         `progress:${item.progressPercent}%`,
-        `hints:${item.hintsOpenedCount}`,
+        ...(STEP_HINTS_ENABLED ? [`hints:${item.hintsOpenedCount}`] : []),
         `last:${new Date(item.lastActivityAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`
       ].join(" | ")
     );
@@ -448,7 +462,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
         item.gameTitle ?? "no-jam",
         item.currentStepTitle ?? "no-step",
         `progress:${item.progressPercent}%`,
-        `hints:${item.hintsOpenedCount}`,
+        ...(STEP_HINTS_ENABLED ? [`hints:${item.hintsOpenedCount}`] : []),
         `reviewed:${item.reviewedAt ? "yes" : "no"}`,
         `last:${new Date(item.lastActivityAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`
       ].join(" | ")
@@ -474,7 +488,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
         item.gameTitle ?? "no-jam",
         item.currentStepTitle ?? "no-step",
         `progress:${item.progressPercent}%`,
-        `hints:${item.hintsOpenedCount}`,
+        ...(STEP_HINTS_ENABLED ? [`hints:${item.hintsOpenedCount}`] : []),
         `last:${new Date(item.lastActivityAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`
       ].join(" | ")
     );
@@ -1062,10 +1076,12 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
               ) : null}
 
               <div className="button-row">
-                {latestTimelineEvent ? <span className="pill">Последнее событие: {latestTimelineEvent.type}</span> : null}
+                {latestTimelineEvent ? (
+                  <span className="pill">Последнее событие: {timelineLabel[latestTimelineEvent.type] ?? latestTimelineEvent.type}</span>
+                ) : null}
                 {latestHelpEvent ? (
                   <span className="pill">
-                    Событие помощи: {latestHelpEvent.type} в {new Date(latestHelpEvent.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+                    Событие помощи: {timelineLabel[latestHelpEvent.type] ?? latestHelpEvent.type} в {new Date(latestHelpEvent.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
                   </span>
                 ) : null}
                 <button className="button-secondary" onClick={() => setSelectedParticipantId(detail.participant.id)}>
@@ -1180,11 +1196,13 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                   <div key={step.id} className="card" style={{ padding: 16 }}>
                     <div className="button-row" style={{ justifyContent: "space-between" }}>
                       <strong>{detail.stepTitles[step.stepId] ?? step.stepId}</strong>
-                      <span className="pill">{step.status}</span>
+                      <span className="pill">{stepStatusLabel[step.status] ?? step.status}</span>
                     </div>
                     <div className="button-row">
                       {STEP_HINTS_ENABLED ? <span className="pill">Подсказки: {step.hintsOpenedCount}</span> : null}
-                      <span className="pill">Последняя подсказка: L{step.lastHintLevelOpened}</span>
+                      {STEP_HINTS_ENABLED && step.lastHintLevelOpened ? (
+                        <span className="pill">Последняя подсказка: L{step.lastHintLevelOpened}</span>
+                      ) : null}
                     </div>
                     <div className="button-row">
                       {step.needsHelpAt ? (
@@ -1200,7 +1218,11 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
 
               <div className="stack">
                 <strong>Хронология действий</strong>
-                {detail.timeline.length ? detail.timeline.map((event) => (
+                {(() => {
+                  const visibleTimeline = STEP_HINTS_ENABLED
+                    ? detail.timeline
+                    : detail.timeline.filter((event) => event.type !== "hint_opened");
+                  return visibleTimeline.length ? visibleTimeline.map((event) => (
                   <div
                     key={event.id}
                     className="card"
@@ -1220,7 +1242,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                   >
                     <div className="button-row" style={{ justifyContent: "space-between" }}>
                       <strong>{event.title}</strong>
-                      <span className="pill" style={{ color: timelineTone[event.type] ?? "#fff" }}>{event.type}</span>
+                      <span className="pill" style={{ color: timelineTone[event.type] ?? "#fff" }}>{timelineLabel[event.type] ?? event.type}</span>
                     </div>
                     <div className="button-row">
                       <span className="pill">
@@ -1229,7 +1251,8 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                     </div>
                     {event.description ? <p className="subtle" style={{ marginBottom: 0 }}>{event.description}</p> : null}
                   </div>
-                )) : <p className="subtle">Хронология действий пока не сформирована.</p>}
+                  )) : <p className="subtle">Хронология действий пока не сформирована.</p>;
+                })()}
               </div>
             </>
           ) : null}
