@@ -169,6 +169,9 @@ async function buildTestApp() {
   const { RolesGuard } = await import('../apps/api/dist/common/roles.guard.js');
   const { UnauthorizedException } = await import('@nestjs/common');
   const { repo, prisma } = fixture({ completed: true });
+  // A second real participant, so tests can prove distinct real identities behind one IP
+  // get independent buckets, and that neither can be used to bypass pre-auth (login) limits.
+  prisma.participant.findUnique = async ({ where }) => (['child', 'sibling'].includes(where.id) ? { id: where.id } : null);
   const auth = {
     getSessionByToken: async token => ({ user: { id: 'trainer', role: 'trainer', currentOrganizationId: token === 'foreign' ? 'other-org' : 'org' } }),
     touchSession: async () => {},
@@ -217,12 +220,13 @@ test('real HTTP routes require trainer auth and keep repeated notification reads
   } finally { await app.close(); }
 });
 
-test('login brute-force limiter survives spoofed x-participant-id headers', async () => {
+test('login brute-force limiter ignores x-participant-id entirely, real or fake', async () => {
   const { app, base } = await buildTestApp();
   try {
-    // The login route is pre-auth: no cookie, no real participant. AppThrottlerGuard must
-    // fall back to IP tracking here no matter what x-participant-id claims to be, otherwise
-    // an attacker could mint a fresh header value per request to dodge the limiter entirely.
+    // /auth/login is not @ParticipantScoped(), so AppThrottlerGuard must fall back to IP
+    // tracking regardless of what x-participant-id claims — a made-up id, or (the easy-to-miss
+    // case) a genuinely real participant id that has nothing to do with authentication. Both
+    // used to mint a fresh limiter bucket per request and fully dodge the brute-force limit.
     const attempt = (participantHeader) =>
       fetch(`${base}/api/auth/login`, {
         method: 'POST',
@@ -233,45 +237,117 @@ test('login brute-force limiter survives spoofed x-participant-id headers', asyn
         body: JSON.stringify({ email: 'nobody@example.com', password: 'wrong' })
       });
 
-    // First 6 attempts (the configured limit) are rejected on credentials, not on rate.
+    // First 6 attempts (the configured limit) are rejected on credentials, not on rate —
+    // each one claiming a DIFFERENT REAL existing participant id (child, then sibling,
+    // alternating). If the header were honored here, these two real identities would each
+    // get their own 6-request budget and never trip the limiter.
+    const realIds = ['child', 'sibling'];
     for (let index = 0; index < 6; index += 1) {
-      const response = await attempt(`spoofed-${index}-${Math.random()}`);
-      assert.equal(response.status, 401, `attempt ${index} should fail on bad credentials, not be pre-emptively throttled`);
+      const response = await attempt(realIds[index % realIds.length]);
+      assert.equal(response.status, 401, `attempt ${index} (real id "${realIds[index % realIds.length]}") should fail on bad credentials, not be pre-emptively throttled`);
     }
 
-    // The 7th attempt, even with yet another never-seen participant id, must still be throttled
-    // because none of those ids resolve to a real participant and tracking falls back to IP.
-    const throttled = await attempt(`spoofed-final-${Math.random()}`);
-    assert.equal(throttled.status, 429, 'spoofing x-participant-id must not reset the login limiter');
+    // The 7th attempt, still claiming a real participant id, must be throttled — proves real
+    // ids are not honored on this route at all, closing the exact bypass that was reported.
+    const throttledRealId = await attempt('child');
+    assert.equal(throttledRealId.status, 429, 'a real participant id must not reset or bypass the login limiter');
+    assert.ok(Number(throttledRealId.headers.get('Retry-After')) > 0, '429 carries a usable Retry-After');
 
-    // Sanity: without any header at all, the limiter is still tripped (pure IP tracking).
+    // Reset with a fresh app/IP-equivalent bucket to also confirm the made-up-id case in isolation.
+    await app.close();
+  } finally {
+    // no-op: app already closed above
+  }
+
+  const second = await buildTestApp();
+  try {
+    const attempt = (participantHeader) =>
+      fetch(`${second.base}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(participantHeader ? { 'x-participant-id': participantHeader } : {})
+        },
+        body: JSON.stringify({ email: 'nobody@example.com', password: 'wrong' })
+      });
+
+    for (let index = 0; index < 6; index += 1) {
+      const response = await attempt(`spoofed-${index}-${Math.random()}`);
+      assert.equal(response.status, 401, `attempt ${index} (made-up id) should fail on bad credentials, not be pre-emptively throttled`);
+    }
+    const throttledFake = await attempt(`spoofed-final-${Math.random()}`);
+    assert.equal(throttledFake.status, 429, 'a made-up participant id must not reset the login limiter');
+
     const throttledNoHeader = await attempt(undefined);
-    assert.equal(throttledNoHeader.status, 429);
+    assert.equal(throttledNoHeader.status, 429, 'plain IP tracking (no header at all) remains throttled too');
+  } finally { await second.app.close(); }
+});
+
+test('different participants behind one IP get independent limits on their own participant-scoped actions', async () => {
+  const { app, base } = await buildTestApp();
+  try {
+    // request-review is @ParticipantScoped() and limited to 40/60s. Exhausting participant
+    // "child"'s own budget must not affect "sibling" — they're different real identities,
+    // same simulated IP (both requests come from this same test process/socket).
+    const forChild = () => fetch(`${base}/api/public/participants/child/request-review`, {
+      method: 'POST', headers: { 'x-participant-id': 'child' }
+    });
+    const first = await forChild();
+    assert.equal(first.status, 201);
+    // Re-requesting an already-requested review is still accepted (idempotent), so we can
+    // cheaply burn through child's budget without needing 40 distinct completed progresses.
+    let childThrottled = false;
+    for (let index = 0; index < 45 && !childThrottled; index += 1) {
+      const response = await forChild();
+      if (response.status === 429) childThrottled = true;
+    }
+    assert.ok(childThrottled, 'child\'s own budget does get exhausted (sanity check on the test itself)');
+
+    const forSibling = await fetch(`${base}/api/public/participants/sibling/request-review`, {
+      method: 'POST', headers: { 'x-participant-id': 'sibling' }
+    });
+    // sibling has no progress in this fixture, so the real app logic 400s/404s on it — the
+    // point is it must NOT be 429. A 429 here would mean sibling shared child's bucket.
+    assert.notEqual(forSibling.status, 429, "sibling must not inherit child's exhausted bucket");
   } finally { await app.close(); }
 });
 
-test('AppThrottlerGuard isolates real participants but distrusts unknown participant ids', async () => {
+test('AppThrottlerGuard only trusts x-participant-id on @ParticipantScoped() routes, and only for real ids', async () => {
   const { AppThrottlerGuard } = await import('../apps/api/dist/common/app-throttler.guard.js');
   const { Reflector } = await import('@nestjs/core');
+  const { PublicController } = await import('../apps/api/dist/modules/controllers/public.controller.js');
+  const { AuthController } = await import('../apps/api/dist/modules/controllers/auth.controller.js');
   const { prisma } = fixture();
+  prisma.participant.findUnique = async ({ where }) => (['child', 'sibling'].includes(where.id) ? { id: where.id } : null);
   const authStub = { getSessionByToken: async () => null };
   const guard = new AppThrottlerGuard({}, {}, new Reflector(), authStub, prisma);
 
+  const scopedContext = { getHandler: () => PublicController.prototype.requestReview, getClass: () => PublicController };
+  const unscopedContext = { getHandler: () => AuthController.prototype.login, getClass: () => AuthController };
   const sameIp = { ip: '10.0.0.5' };
-  const trackerForChild = await guard.getTracker({ ...sameIp, headers: { 'x-participant-id': 'child' } });
-  assert.equal(trackerForChild, 'participant:child', 'a real participant id is trusted and keyed on its own identity');
+
+  const trackerForChild = await guard.getTracker({ ...sameIp, headers: { 'x-participant-id': 'child' } }, scopedContext);
+  assert.equal(trackerForChild, 'participant:child', 'a real participant id is trusted on a @ParticipantScoped() route');
 
   // A second, equally real participant behind the SAME classroom IP must get its own bucket.
-  prisma.participant.findUnique = async ({ where }) => (['child', 'sibling'].includes(where.id) ? { id: where.id } : null);
-  const trackerForSibling = await guard.getTracker({ ...sameIp, headers: { 'x-participant-id': 'sibling' } });
+  const trackerForSibling = await guard.getTracker({ ...sameIp, headers: { 'x-participant-id': 'sibling' } }, scopedContext);
   assert.equal(trackerForSibling, 'participant:sibling');
   assert.notEqual(trackerForChild, trackerForSibling, 'two real participants behind one IP must not share a limiter bucket');
 
   // An id nobody issued (spoofed) must NOT be trusted as an identity — falls back to IP.
-  const trackerForGhost = await guard.getTracker({ ...sameIp, headers: { 'x-participant-id': 'ghost-does-not-exist' } });
+  const trackerForGhost = await guard.getTracker({ ...sameIp, headers: { 'x-participant-id': 'ghost-does-not-exist' } }, scopedContext);
   assert.equal(trackerForGhost, '10.0.0.5', 'an unknown participant id must fall back to IP tracking, not grant a fresh bucket');
 
   // No header and no cookie: plain IP fallback, used for login/join before any identity exists.
-  const trackerPreAuth = await guard.getTracker({ ...sameIp, headers: {} });
+  const trackerPreAuth = await guard.getTracker({ ...sameIp, headers: {} }, scopedContext);
   assert.equal(trackerPreAuth, '10.0.0.5');
+
+  // The critical case: on a route NOT marked @ParticipantScoped() (e.g. login), even a
+  // genuinely real participant id must be ignored entirely — falls straight to IP.
+  const trackerOnLoginWithRealId = await guard.getTracker({ ...sameIp, headers: { 'x-participant-id': 'child' } }, unscopedContext);
+  assert.equal(trackerOnLoginWithRealId, '10.0.0.5', 'a real participant id must be ignored on a non-participant-scoped route like login');
+
+  // And with no context at all (defensive default for any caller that forgets to pass one).
+  const trackerNoContext = await guard.getTracker({ ...sameIp, headers: { 'x-participant-id': 'child' } });
+  assert.equal(trackerNoContext, '10.0.0.5', 'without route context, the header is never trusted — safe default');
 });

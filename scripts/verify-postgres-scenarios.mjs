@@ -37,7 +37,6 @@ async function main() {
   console.log(`\n== Verifying against ${BASE} (real PostgreSQL) ==\n`);
 
   const trainerCookie = await login("trainer@example.com", "trainer123");
-  const adminCookie = await login("admin@example.com", "admin123");
 
   // Find the active jam + a published game version to attach.
   const jamsRes = await json(await fetch(`${BASE}/trainer/jams`, { headers: { cookie: trainerCookie } }));
@@ -148,13 +147,11 @@ async function main() {
   assertTrue(!notifs7.body.data.some((n) => n.kind === "review" && n.participantId === participantId), "scenario 8: reviewed result clears from the trainer queue");
 
   // --- Scenario 9: another organization cannot see or act on this participant's requests ---
-  const orgsRes = await json(await fetch(`${BASE}/admin/organizations`, { headers: { cookie: adminCookie } }));
-  const otherOrg = (orgsRes.body?.data ?? []).find((o) => o.id !== activeJam.organizationId);
-  if (otherOrg) {
-    console.log(`     (using second organization: ${otherOrg.name ?? otherOrg.id})`);
-  } else {
-    console.log("     (no second organization available in this environment — skipping live cross-org fetch; covered by the mocked-Prisma unit test instead)");
-  }
+  // A full, real two-organization version of this (separate orgs, separate trainers, a real
+  // participant, verifying the bell/detail/resolve/mark-reviewed routes and that forbidden
+  // attempts leave data untouched) runs on its own dedicated, disposable database — see
+  // scripts/verify-cross-org-isolation.mjs. This script's dev DB only seeds one organization,
+  // so here we just confirm the negative path (acting on an id outside this trainer's scope).
   const crossOrgResolve = await fetch(`${BASE}/trainer/participants/does-not-exist-in-this-org/resolve-help`, {
     method: "POST",
     headers: { cookie: trainerCookie }

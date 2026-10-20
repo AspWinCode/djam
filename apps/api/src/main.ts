@@ -12,7 +12,11 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     cors: {
       origin: true,
-      credentials: true
+      credentials: true,
+      // Without this, a cross-origin fetch (e.g. local dev: web on :3000, api on :4000)
+      // cannot read Retry-After from a 429 response — only the CORS-safelisted headers
+      // are visible to JS by default, and Retry-After is not one of them.
+      exposedHeaders: ["Retry-After"]
     }
   });
   app.setGlobalPrefix("api");
