@@ -242,7 +242,8 @@ export class ContentRepository {
         resultVideoUrl: step.resultVideoUrl,
         successTitle: step.successTitle,
         successText: step.successText,
-        successXp: step.successXp
+        successXp: step.successXp,
+        isBonus: step.isBonus
       });
 
       for (const hint of step.hints) {
@@ -345,7 +346,8 @@ export class ContentRepository {
         resultVideoUrl: dto.resultVideoUrl,
         successTitle: dto.successTitle,
         successText: dto.successText,
-        successXp: dto.successXp
+        successXp: dto.successXp,
+        isBonus: dto.isBonus ?? false
       }
     });
 
@@ -378,7 +380,8 @@ export class ContentRepository {
         successTitle: dto.successTitle,
         successText: dto.successText,
         successXp: dto.successXp,
-        isActive: dto.isActive
+        isActive: dto.isActive,
+        isBonus: dto.isBonus
       }
     });
 
@@ -562,7 +565,8 @@ export class ContentRepository {
             successTitle: step.successTitle,
             successText: step.successText,
             successXp: step.successXp,
-            isActive: step.isActive
+            isActive: step.isActive,
+            isBonus: step.isBonus ?? false
           }
         });
 
@@ -626,7 +630,8 @@ export class ContentRepository {
         resultVideoUrl: step.resultVideoUrl,
         successTitle: step.successTitle,
         successText: step.successText,
-        successXp: step.successXp
+        successXp: step.successXp,
+        isBonus: step.isBonus
       });
 
       for (const hint of step.hints) {
@@ -735,6 +740,16 @@ export class ContentRepository {
 
     if (game.steps.some((step) => !step.title.trim())) {
       throw new Error("Cannot publish a game with untitled steps");
+    }
+
+    // Bonus steps are optional extras for fast participants: at least one
+    // required step must exist, and every bonus step must come after all of them.
+    const firstBonusIndex = game.steps.findIndex((step) => step.isBonus);
+    if (firstBonusIndex === 0) {
+      throw new Error("Game must start with at least one required (non-bonus) step");
+    }
+    if (firstBonusIndex !== -1 && game.steps.slice(firstBonusIndex).some((step) => !step.isBonus)) {
+      throw new Error("Bonus steps must come after all required steps");
     }
 
     for (const [index, step] of game.steps.entries()) {
@@ -882,6 +897,7 @@ export class ContentRepository {
     successText: string;
     successXp: number;
     isActive: boolean;
+    isBonus: boolean;
     createdAt: Date;
     updatedAt: Date;
   }): GameStep {
@@ -900,6 +916,7 @@ export class ContentRepository {
       successText: step.successText,
       successXp: step.successXp,
       isActive: step.isActive,
+      isBonus: step.isBonus,
       createdAt: step.createdAt.toISOString(),
       updatedAt: step.updatedAt.toISOString()
     };

@@ -137,6 +137,7 @@ export function AdminStepCardClient({
   const [successXp, setSuccessXp] = useState(String(step.successXp));
   const [resultImageUrl, setResultImageUrl] = useState(step.resultImageUrl ?? "");
   const [resultVideoUrl, setResultVideoUrl] = useState(step.resultVideoUrl ?? "");
+  const [isBonus, setIsBonus] = useState(step.isBonus ?? false);
   const [pending, setPending] = useState<"hint" | "delete" | "reorder" | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "dirty" | "saving" | "saved" | "conflict" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -157,9 +158,10 @@ export function AdminStepCardClient({
       successText: successText.trim(),
       successXp: Number(successXp),
       resultImageUrl: resultImageUrl.trim() || undefined,
-      resultVideoUrl: resultVideoUrl.trim() || undefined
+      resultVideoUrl: resultVideoUrl.trim() || undefined,
+      isBonus
     }),
-    [description, goalText, taskImageUrl, taskVideoUrl, resultImageUrl, resultVideoUrl, successText, successTitle, successXp, title]
+    [description, goalText, taskImageUrl, taskVideoUrl, resultImageUrl, resultVideoUrl, successText, successTitle, successXp, title, isBonus]
   );
 
   async function saveStep(manual = false) {
@@ -316,6 +318,7 @@ export function AdminStepCardClient({
       <div className="button-row" style={{ justifyContent: "space-between" }}>
         <strong>
           {step.orderIndex}. {step.title}
+          {isBonus ? <span className="pill active" style={{ marginLeft: 8 }}>⭐ Бонус</span> : null}
         </strong>
         <div className="button-row">
           <span className="pill">{saveLabel}</span>
@@ -341,6 +344,16 @@ export function AdminStepCardClient({
       <label className="stack">
         <span>Название этапа</span>
         <input className="input" value={title} onChange={(event) => setTitle(event.target.value)} disabled={!canEdit} />
+      </label>
+
+      <label style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+        <input type="checkbox" checked={isBonus} onChange={(event) => setIsBonus(event.target.checked)} disabled={!canEdit} style={{ marginTop: 4 }} />
+        <span>
+          <strong>Бонусный этап</strong>
+          <span className="subtle" style={{ display: "block" }}>
+            Необязательный этап для самых быстрых: не входит в прогресс игры, даёт дополнительный XP. Бонусные этапы должны идти после всех обязательных.
+          </span>
+        </span>
       </label>
 
       <label className="stack">

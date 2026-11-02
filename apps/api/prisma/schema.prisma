@@ -255,6 +255,7 @@ model GameStep {
   successText    String   @map("success_text")
   successXp      Int      @map("success_xp")
   isActive       Boolean  @default(true) @map("is_active")
+  isBonus        Boolean  @default(false) @map("is_bonus")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 

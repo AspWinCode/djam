@@ -58,6 +58,7 @@ export interface CreateStepDto {
   successXp: number;
   resultVideoUrl?: string;
   resultImageUrl?: string;
+  isBonus?: boolean;
 }
 
 export interface UpdateStepDto extends Partial<CreateStepDto> {

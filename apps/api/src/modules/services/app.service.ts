@@ -422,10 +422,10 @@ export class AppService {
   }
 
   async completeStep(stepId: string, participantId: string) {
-    const progress = await this.progressRepository.completeStep(participantId, stepId);
+    const { progress, finishedRequired } = await this.progressRepository.completeStep(participantId, stepId);
     const jamId = await this.sessionRepository.getParticipantJam(participantId);
     this.emitToJam(jamId, {
-      type: progress.isCompleted ? "participant_completed_jam" : "participant_progress_updated",
+      type: finishedRequired ? "participant_completed_jam" : "participant_progress_updated",
       payload: { participantId, progress },
       emittedAt: nowIso()
     });

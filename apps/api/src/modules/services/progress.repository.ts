@@ -69,7 +69,8 @@ export class ProgressRepository {
           gameVersionId,
           currentStepId: firstStep.id,
           completedStepsCount: 0,
-          totalStepsCount: steps.length,
+          // Bonus steps are optional extras, so they don't count toward the required total.
+          totalStepsCount: steps.filter((step) => !step.isBonus).length,
           xpTotal: 0,
           isCompleted: false
         }
@@ -157,7 +158,8 @@ export class ProgressRepository {
     };
   }
 
-  async completeStep(participantId: string, stepId: string): Promise<ParticipantProgress> {
+  /** `finishedRequired` is true only for the step that completes the required part of the game. */
+  async completeStep(participantId: string, stepId: string): Promise<{ progress: ParticipantProgress; finishedRequired: boolean }> {
     const progress = await this.prisma.participantProgress.findFirst({
       where: { participantId },
       orderBy: { startedAt: "desc" }
@@ -187,6 +189,17 @@ export class ProgressRepository {
 
     const currentStep = steps[currentIndex];
     const nextStep = steps[currentIndex + 1];
+    const isBonusStep = Boolean(currentStep.isBonus);
+    // Bonus steps always trail the required ones (enforced on publish), so the
+    // last required step is the one followed by a bonus step or by nothing.
+    const requiredDone = !isBonusStep && (!nextStep || Boolean(nextStep.isBonus));
+
+    const existingStepProgress = await this.prisma.participantStepProgress.findFirst({
+      where: { participantId, gameVersionId: progress.gameVersionId, stepId }
+    });
+    if (existingStepProgress?.status === "completed") {
+      throw new Error("Step is already completed");
+    }
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.participantStepProgress.updateMany({
@@ -219,25 +232,27 @@ export class ProgressRepository {
       await tx.participant.update({
         where: { id: participantId },
         data: {
-          status: nextStep ? "active" : "completed",
+          status: requiredDone || isBonusStep ? "completed" : "active",
           lastSeenAt: new Date()
         }
       });
 
+      // Once the required steps are done the game counts as completed; the
+      // bonus steps that follow only add XP and never reopen or re-time it.
       return tx.participantProgress.update({
         where: { id: progress.id },
         data: {
           currentStepId: nextStep?.id ?? stepId,
-          completedStepsCount: progress.completedStepsCount + 1,
+          completedStepsCount: isBonusStep ? progress.completedStepsCount : progress.completedStepsCount + 1,
           xpTotal: progress.xpTotal + currentStep.successXp,
-          isCompleted: !nextStep,
-          completedAt: nextStep ? null : new Date(),
-          reviewedAt: nextStep ? null : progress.reviewedAt
+          isCompleted: progress.isCompleted || requiredDone,
+          completedAt: requiredDone ? new Date() : isBonusStep ? progress.completedAt : null,
+          reviewedAt: requiredDone || isBonusStep ? progress.reviewedAt : null
         }
       });
     });
 
-    return this.toParticipantProgress(updated);
+    return { progress: this.toParticipantProgress(updated), finishedRequired: requiredDone };
   }
 
   async openNextHint(participantId: string, stepId: string): Promise<StepHint> {
@@ -376,10 +391,6 @@ export class ProgressRepository {
       throw new NotFoundException("Progress not found");
     }
 
-    if (progress.isCompleted || progress.currentStepId !== stepId) {
-      throw new BadRequestException("Помощь можно запросить только на текущем этапе");
-    }
-
     const stepProgress = await this.prisma.participantStepProgress.findFirst({
       where: {
         participantId,
@@ -389,6 +400,12 @@ export class ProgressRepository {
     });
     if (!stepProgress) {
       throw new NotFoundException("Step progress not found");
+    }
+
+    // isCompleted only means the required steps are done; help is still allowed
+    // while a bonus step is the active one.
+    if (progress.currentStepId !== stepId || stepProgress.status !== "active") {
+      throw new BadRequestException("Помощь можно запросить только на текущем этапе");
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -472,7 +489,7 @@ export class ProgressRepository {
       await tx.participant.update({
         where: { id: participantId },
         data: {
-          status: "active",
+          status: progress?.isCompleted ? "completed" : "active",
           lastSeenAt: new Date()
         }
       });
@@ -880,6 +897,7 @@ export class ProgressRepository {
       const step = snapshot?.steps.find((item) => item.id === progress?.currentStepId);
       const participantStepItems = stepProgressItems.filter((item) => item.participantId === participant.id && item.gameVersionId === progress?.gameVersionId);
       const derivedStatus = this.deriveParticipantStatus(participant.status, participant.lastSeenAt);
+      const bonusStepIds = new Set((snapshot?.steps ?? []).filter((item) => item.isBonus).map((item) => item.id));
 
       return {
         participant: {
@@ -892,7 +910,9 @@ export class ProgressRepository {
         hintsOpenedCount: participantStepItems.reduce((sum, item) => sum + item.hintsOpenedCount, 0),
         lastActivityAt: participant.lastSeenAt.toISOString(),
         reviewedAt: progress?.reviewedAt?.toISOString(),
-        reviewRequestedAt: progress?.reviewRequestedAt?.toISOString()
+        reviewRequestedAt: progress?.reviewRequestedAt?.toISOString(),
+        bonusTotalCount: bonusStepIds.size,
+        bonusCompletedCount: participantStepItems.filter((item) => bonusStepIds.has(item.stepId) && item.status === "completed").length
       };
     });
   }

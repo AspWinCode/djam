@@ -152,6 +152,7 @@ function StepEditor({
   const [successTitle, setSuccessTitle] = useState(step.successTitle);
   const [successText, setSuccessText] = useState(step.successText);
   const [successXp, setSuccessXp] = useState(String(step.successXp));
+  const [isBonus, setIsBonus] = useState(step.isBonus ?? false);
   const [pending, setPending] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -167,8 +168,9 @@ function StepEditor({
     goalText: goalText.trim(),
     successTitle: successTitle.trim(),
     successText: successText.trim(),
-    successXp: Number(successXp)
-  }), [title, description, goalText, successTitle, successText, successXp]);
+    successXp: Number(successXp),
+    isBonus
+  }), [title, description, goalText, successTitle, successText, successXp, isBonus]);
 
   async function save() {
     if (!canEdit) return;
@@ -240,6 +242,7 @@ function StepEditor({
           {saveIcon ? <span style={{ color: "var(--dim)", fontSize: 11 }}>{saveIcon}</span> : null}
         </div>
         <div className="button-row" style={{ gap: 4 }}>
+          {isBonus ? <span className="pill active" style={{ fontSize: 11 }}>⭐ Бонус</span> : null}
           <span className="pill" style={{ fontSize: 11 }}>{step.hints.length} подск.</span>
           <span className="pill" style={{ fontSize: 11 }}>{step.successXp} XP</span>
           <span style={{ color: "var(--dim)", fontSize: 16 }}>{expanded ? "\u25B2" : "\u25BC"}</span>
@@ -259,6 +262,14 @@ function StepEditor({
               <input className="input" value={successXp} onChange={(e) => setSuccessXp(e.target.value)} inputMode="numeric" disabled={!canEdit} />
             </label>
           </div>
+
+          <label style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <input type="checkbox" checked={isBonus} onChange={(e) => setIsBonus(e.target.checked)} disabled={!canEdit} style={{ marginTop: 3 }} />
+            <span style={{ fontSize: 13 }}>
+              <strong>Бонусный этап</strong> — необязательный, для самых быстрых; не входит в прогресс игры, даёт дополнительный XP.
+              Бонусные этапы должны идти после всех обязательных.
+            </span>
+          </label>
 
           <div className="stack-sm">
             <span style={{ fontSize: 12, color: "var(--muted)" }}>Описание</span>

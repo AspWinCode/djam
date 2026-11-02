@@ -178,6 +178,12 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                 progressPercent: Math.round(
                   (event.payload.progress.completedStepsCount / event.payload.progress.totalStepsCount) * 100
                 ),
+                // Finishing the last required step emits participant_completed_jam, so a later
+                // progress update on an already finished game means a bonus step was completed.
+                bonusCompletedCount:
+                  event.payload.progress.isCompleted && item.progressPercent >= 100
+                    ? Math.min((item.bonusCompletedCount ?? 0) + 1, item.bonusTotalCount ?? 0)
+                    : item.bonusCompletedCount,
                 lastActivityAt: new Date().toISOString()
               }
             : item
@@ -824,6 +830,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                   {item.gameTitle ?? "Игра не выбрана"} · {item.progressPercent}% готово
                 </p>
                 <div className="button-row">
+                  {item.bonusTotalCount ? <span className="pill">⭐ Бонусы: {item.bonusCompletedCount ?? 0}/{item.bonusTotalCount}</span> : null}
                   {STEP_HINTS_ENABLED ? <span className="pill">Подсказки: {item.hintsOpenedCount}</span> : null}
                   <span className="pill">
                     Финал: {new Date(item.lastActivityAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
@@ -986,6 +993,11 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                   <td>{item.currentStepTitle ?? "Ожидает"}</td>
                   <td style={{ minWidth: 180 }}>
                     <div className="progress"><span style={{ width: `${item.progressPercent}%` }} /></div>
+                    {item.bonusTotalCount ? (
+                      <span className="pill" style={{ fontSize: 11, marginTop: 4 }}>
+                        ⭐ бонусы {item.bonusCompletedCount ?? 0}/{item.bonusTotalCount}
+                      </span>
+                    ) : null}
                   </td>
                   {STEP_HINTS_ENABLED ? <td>{item.hintsOpenedCount}</td> : null}
                   <td>

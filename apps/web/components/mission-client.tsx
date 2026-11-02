@@ -355,6 +355,7 @@ export function MissionClient({
   const [hintPending, setHintPending] = useState(false); // waiting for trainer approval
   const [error, setError] = useState<string | null>(null);
   const [successStep, setSuccessStep] = useState<GameStep | null>(null);
+  const [bonusActive, setBonusActive] = useState(false);
   const [panelMode, setPanelMode] = useState<PanelMode>("split");
   const [editorLoaded, setEditorLoaded] = useState(false);
   const [leftWidth, setLeftWidth] = useState(380);
@@ -395,8 +396,26 @@ export function MissionClient({
   const patternStyle    = ACCENT_PATTERN[accentStyle] ?? null;
   // ─────────────────────────────────────────────────────────────────────────
 
-  const currentStepIndex = Math.min(completedStepsCount, steps.length - 1);
+  // Bonus steps are optional extras that always trail the required ones. The
+  // server counts only required steps in completedStepsCount, so once those are
+  // done the final screen is shown and bonus steps are offered from there.
+  const requiredStepsCount = steps.filter((step) => !step.isBonus).length;
+  const bonusSteps = steps.filter((step) => step.isBonus);
+  const requiredDone = completedStepsCount >= requiredStepsCount;
+  const nextBonusStep = bonusSteps.find(
+    (step) => stepProgress.find((item) => item.stepId === step.id)?.status !== "completed"
+  );
+  const bonusDoneCount = bonusSteps.filter((step) =>
+    stepProgress.some((item) => item.stepId === step.id && item.status === "completed")
+  ).length;
+  const inBonus = requiredDone && bonusActive && Boolean(nextBonusStep);
+  const currentStepIndex = inBonus && nextBonusStep
+    ? steps.indexOf(nextBonusStep)
+    : Math.min(completedStepsCount, requiredStepsCount - 1);
   const currentStep = steps[currentStepIndex];
+  const stepCounterLabel = inBonus
+    ? `Бонус ${bonusDoneCount + 1}/${bonusSteps.length}`
+    : `Этап ${Math.min(completedStepsCount + 1, requiredStepsCount)}/${requiredStepsCount}`;
   const activeStepProgress = stepProgress.find((item) => item.stepId === currentStep?.id);
   const openedHintLevel = activeStepProgress?.lastHintLevelOpened ?? 0;
   const openedHints = currentStep?.hints.slice(0, openedHintLevel) ?? [];
@@ -409,7 +428,7 @@ export function MissionClient({
   const progressPercent = initialProgress.totalStepsCount
     ? (completedStepsCount / initialProgress.totalStepsCount) * 100
     : 0;
-  const isCompleted = completedStepsCount >= steps.length;
+  const isCompleted = requiredDone && !inBonus;
   const joinHref = childSession?.joinCode ? `/join/${childSession.joinCode}` : "/";
   const helpRequested = activeStepProgress?.needsHelpFlag ?? false;
   const totalHintsOpened = stepProgress.reduce((sum, item) => sum + item.hintsOpenedCount, 0);
@@ -421,8 +440,8 @@ export function MissionClient({
 
   const missionSummary = useMemo(() => {
     const helpPart = helpRequestsCount > 0 ? `запросов помощи: ${helpRequestsCount}` : "без запросов помощи";
-    return `${version.snapshotJson.game.title}: ${steps.length} этапов, ${xpTotal} XP, ${totalHintsOpened} подсказок, ${helpPart}.`;
-  }, [helpRequestsCount, totalHintsOpened, version, xpTotal, steps]);
+    return `${version.snapshotJson.game.title}: ${requiredStepsCount} этапов, ${xpTotal} XP, ${totalHintsOpened} подсказок, ${helpPart}.`;
+  }, [helpRequestsCount, totalHintsOpened, version, xpTotal, requiredStepsCount]);
 
   useEffect(() => {
     if (!isCompleted || attemptSavedRef.current) return;
@@ -650,7 +669,7 @@ export function MissionClient({
               </div>
             </div>
             <div className="button-row" style={{ gap: 6, flexShrink: 0 }}>
-              <span className="pill" style={{ fontSize: 11 }}>Этап {Math.min(completedStepsCount + 1, steps.length)}/{steps.length}</span>
+              <span className="pill" style={{ fontSize: 11 }}>{stepCounterLabel}</span>
               <span className="pill active" style={{ fontSize: 11 }}>{xpDisplay} XP</span>
               {panelMode === "info-only" ? (
                 <button
@@ -685,7 +704,8 @@ export function MissionClient({
                 </div>
                 <div className="grid grid-2" style={{ gap: 8 }}>
                   {[
-                    ["Этапов", steps.length],
+                    ["Этапов", requiredStepsCount],
+                    ...(bonusSteps.length > 0 ? [["Бонусов", `${bonusDoneCount}/${bonusSteps.length}`]] : []),
                     ["XP", xpTotal],
                     ...(STEP_HINTS_ENABLED ? [["Подсказок", totalHintsOpened]] : []),
                     ["Запросов помощи", helpRequestsCount]
@@ -696,6 +716,24 @@ export function MissionClient({
                     </div>
                   ))}
                 </div>
+                {bonusSteps.length > 0 ? (
+                  <div className="card" style={{ padding: 14, border: "1px solid color-mix(in srgb, #f5b301 45%, transparent)" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", marginBottom: 6 }}>⭐ БОНУСНЫЕ ЭТАПЫ</div>
+                    {nextBonusStep ? (
+                      <>
+                        <p style={{ margin: "0 0 10px", fontSize: 13, lineHeight: 1.5 }}>
+                          Ты прошёл все обязательные этапы! Есть дополнительное задание «{nextBonusStep.title}» (+{nextBonusStep.successXp} XP).
+                          Оно необязательное — берись, если хочется ещё.
+                        </p>
+                        <button className="button" style={{ width: "100%", justifyContent: "center" }} onClick={() => setBonusActive(true)}>
+                          {bonusDoneCount > 0 ? "⭐ Продолжить бонусы" : "⭐ Взять бонусный этап"}
+                        </button>
+                      </>
+                    ) : (
+                      <p style={{ margin: 0, fontSize: 13 }}>Все бонусные этапы пройдены — отличная работа!</p>
+                    )}
+                  </div>
+                ) : null}
                 {hardestStepTitle ? (
                   <div className="card" style={{ padding: 12 }}>
                     <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>СЛОЖНЕЕ ВСЕГО</div>
@@ -724,12 +762,18 @@ export function MissionClient({
                 {/* Step counter mini-map */}
                 <div style={{ display: "flex", gap: 4 }}>
                   {steps.map((step, i) => {
-                    const done = i < completedStepsCount;
+                    const done = stepProgress.some((item) => item.stepId === step.id && item.status === "completed");
                     const active = i === currentStepIndex;
                     return (
-                      <div key={step.id} title={step.title} className={active ? "step-active-pulse" : ""} style={{
+                      <div key={step.id} title={step.isBonus ? `⭐ ${step.title}` : step.title} className={active ? "step-active-pulse" : ""} style={{
                         flex: 1, height: 4, borderRadius: 999,
-                        background: done ? "var(--success)" : active ? "var(--primary)" : "var(--bg-tertiary)",
+                        background: done
+                          ? "var(--success)"
+                          : active
+                            ? "var(--primary)"
+                            : step.isBonus
+                              ? "color-mix(in srgb, #f5b301 40%, var(--bg-tertiary))"
+                              : "var(--bg-tertiary)",
                         transition: "background 400ms"
                       }} />
                     );
@@ -739,7 +783,7 @@ export function MissionClient({
                 {/* Step title */}
                 <div>
                   <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "var(--muted)", textTransform: "uppercase", marginBottom: 6 }}>
-                    Этап {currentStepIndex + 1} из {steps.length}
+                    {inBonus ? `⭐ Бонусный этап ${bonusDoneCount + 1} из ${bonusSteps.length}` : `Этап ${currentStepIndex + 1} из ${requiredStepsCount}`}
                   </div>
                   <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, lineHeight: 1.3 }}>{currentStep.title}</h2>
                 </div>
@@ -875,7 +919,7 @@ export function MissionClient({
               )}
               {editorFull && !isCompleted ? (
                 <span className="pill" style={{ fontSize: 11, background: "color-mix(in srgb, var(--accent) 15%, transparent)", color: "var(--accent-hover)" }}>
-                  Этап {currentStepIndex + 1}/{steps.length}: {currentStep?.title}
+                  {stepCounterLabel}: {currentStep?.title}
                 </span>
               ) : null}
             </div>
@@ -964,7 +1008,7 @@ export function MissionClient({
       {successStep ? (
         <div className="overlay" role="dialog" aria-modal="true">
           <div className="card accent-card stack overlay-card card-bounce">
-            <div className="eyebrow">Этап выполнен</div>
+            <div className="eyebrow">{successStep.isBonus ? "⭐ Бонусный этап выполнен" : "Этап выполнен"}</div>
             <h2 className="section-title" style={{ fontSize: 28 }}>{successStep.successTitle}</h2>
             <p className="subtle">{successStep.successText}</p>
             {(successStep.resultImageUrl || successStep.resultVideoUrl) ? (
@@ -975,10 +1019,12 @@ export function MissionClient({
             ) : null}
             <div className="button-row">
               <span className="pill active">+{successStep.successXp} XP</span>
-              <span className="pill">{completedStepsCount >= steps.length ? "Миссия завершена!" : "Следующий этап открыт"}</span>
+              <span className="pill">{successStep.isBonus
+                ? (nextBonusStep ? "Следующий бонус открыт" : "Все бонусы пройдены!")
+                : (requiredDone ? "Миссия завершена!" : "Следующий этап открыт")}</span>
             </div>
             <button className="button" onClick={() => setSuccessStep(null)} style={{ width: "100%", justifyContent: "center" }}>
-              {completedStepsCount >= steps.length ? "Смотреть итог" : "Продолжить →"}
+              {successStep.isBonus ? (nextBonusStep ? "Продолжить →" : "Смотреть итог") : (requiredDone ? "Смотреть итог" : "Продолжить →")}
             </button>
           </div>
         </div>

@@ -47,6 +47,8 @@ export interface GameStep {
   successText: string;
   successXp: number;
   isActive: boolean;
+  /** Optional extra step for fast participants; absent in versions published before bonus steps existed. */
+  isBonus?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -387,6 +389,8 @@ export interface TrainerParticipantView {
   lastActivityAt: string;
   reviewedAt?: string;
   reviewRequestedAt?: string;
+  bonusTotalCount?: number;
+  bonusCompletedCount?: number;
 }
 
 export interface RealtimeEvent<T = unknown> {

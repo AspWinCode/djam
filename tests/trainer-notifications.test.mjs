@@ -84,9 +84,11 @@ test('unfinished or missing progress cannot request review', async () => {
 });
 
 test('help only applies to the current unfinished step', async () => {
-  const { repo, progress } = fixture();
+  const { repo, progress, step } = fixture();
   await assert.rejects(repo.requestHelp('child', 'different-step'), error => error.getStatus() === 400);
+  // Finishing a game also completes its last step (isCompleted alone no longer blocks help: bonus steps follow it).
   progress.isCompleted = true;
+  step.status = 'completed';
   await assert.rejects(repo.requestHelp('child', 'step'), error => error.getStatus() === 400);
 });
 

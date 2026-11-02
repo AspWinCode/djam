@@ -1,0 +1,2 @@
+ALTER TABLE "jam_steps"
+ADD COLUMN IF NOT EXISTS "is_bonus" BOOLEAN NOT NULL DEFAULT false;

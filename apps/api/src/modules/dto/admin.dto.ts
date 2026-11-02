@@ -187,6 +187,10 @@ export class CreateStepDtoClass {
   @IsOptional()
   @IsString()
   resultImageUrl?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isBonus?: boolean;
 }
 
 export class UpdateStepDtoClass extends CreateStepDtoClass {
