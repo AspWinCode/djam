@@ -925,6 +925,9 @@ export class ProgressRepository {
     status: "active" | "stuck" | "needs_help" | "completed" | "offline";
     joinedAt: Date;
     lastSeenAt: Date;
+    interestPromptOpenedAt?: Date | null;
+    interestResponse?: "continue_learning" | "not_interested" | null;
+    interestRespondedAt?: Date | null;
   }): Participant {
     return {
       id: participant.id,
@@ -933,7 +936,10 @@ export class ProgressRepository {
       avatar: participant.avatar,
       status: participant.status,
       joinedAt: participant.joinedAt.toISOString(),
-      lastSeenAt: participant.lastSeenAt.toISOString()
+      lastSeenAt: participant.lastSeenAt.toISOString(),
+      interestPromptOpenedAt: participant.interestPromptOpenedAt?.toISOString(),
+      interestResponse: participant.interestResponse ?? undefined,
+      interestRespondedAt: participant.interestRespondedAt?.toISOString()
     };
   }
 

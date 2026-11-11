@@ -8,6 +8,7 @@ import type {
   HintApprovedRealtimePayload,
   HintRequestPendingRealtimePayload,
   ParticipantHelpRealtimePayload,
+  ParticipantInterestRealtimePayload,
   ParticipantProgress,
   ParticipantProgressRealtimePayload,
   RealtimeEvent,
@@ -23,6 +24,7 @@ import {
   getTrainerParticipantDetail,
   getTrainerJam,
   markTrainerParticipantReviewed,
+  openParticipantInterestPrompt,
   resolveParticipantHelp
 } from "../lib/api";
 
@@ -30,6 +32,14 @@ const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:4000"
 
 const statusLabel: Record<string, string> = {
   active: "В работе", needs_help: "Нужна помощь", completed: "Завершил", stuck: "Нет активности", offline: "Не в сети"
+};
+const interestLabel: Record<string, string> = {
+  continue_learning: "Хочет продолжить",
+  not_interested: "Не интересно"
+};
+const interestTone: Record<string, string> = {
+  continue_learning: "#22c55e",
+  not_interested: "#94a3b8"
 };
 const stepStatusLabel: Record<string, string> = {
   locked: "Заблокирован", active: "В работе", completed: "Завершён"
@@ -73,6 +83,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
   const [actionError, setActionError] = useState<string | null>(null);
   const [participants, setParticipants] = useState<TrainerParticipantView[]>(initialDetail.participants);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [interestPromptId, setInterestPromptId] = useState<string | null>(null);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("help_first");
@@ -231,6 +242,25 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                 ...item,
                 participant: { ...item.participant, status: "active" },
                 lastActivityAt: new Date().toISOString()
+              }
+            : item
+        )
+      );
+    });
+
+    socket.on("participant_interest_updated", (event: RealtimeEvent<ParticipantInterestRealtimePayload>) => {
+      setLastRealtimeAt(event.emittedAt);
+      setParticipants((current) =>
+        current.map((item) =>
+          item.participant.id === event.payload.participantId
+            ? {
+                ...item,
+                participant: {
+                  ...item.participant,
+                  interestPromptOpenedAt: event.payload.interestPromptOpenedAt,
+                  interestResponse: event.payload.interestResponse,
+                  interestRespondedAt: event.payload.interestRespondedAt
+                }
               }
             : item
         )
@@ -576,6 +606,21 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
     }
   }
 
+  async function handleOpenInterestPrompt(participantId: string) {
+    setInterestPromptId(participantId);
+    try {
+      const participant = await openParticipantInterestPrompt(participantId);
+      setParticipants((current) =>
+        current.map((item) => (item.participant.id === participantId ? { ...item, participant } : item))
+      );
+      setActionError(null);
+    } catch {
+      setActionError("Не удалось показать опрос ученику. Попробуйте ещё раз.");
+    } finally {
+      setInterestPromptId(null);
+    }
+  }
+
   async function handleApproveHint(participantId: string) {
     const req = pendingHintRequests[participantId];
     if (!req) return;
@@ -835,6 +880,13 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                   <span className="pill">
                     Финал: {new Date(item.lastActivityAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
                   </span>
+                  {item.participant.interestResponse ? (
+                    <span className="pill" style={{ color: interestTone[item.participant.interestResponse] }}>
+                      {interestLabel[item.participant.interestResponse]}
+                    </span>
+                  ) : item.participant.interestPromptOpenedAt ? (
+                    <span className="pill">ждём ответ на опрос</span>
+                  ) : null}
                 </div>
                 <div className="button-row">
                   <button className="button-secondary" onClick={() => setSelectedParticipantId(item.participant.id)}>
@@ -850,6 +902,22 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                   >
                     {reviewingId === item.participant.id ? "Сохраняю..." : "Показано тренеру"}
                   </button>
+                  {!item.participant.interestResponse ? (
+                    <button
+                      className="button-secondary"
+                      disabled={interestPromptId === item.participant.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleOpenInterestPrompt(item.participant.id);
+                      }}
+                    >
+                      {interestPromptId === item.participant.id
+                        ? "..."
+                        : item.participant.interestPromptOpenedAt
+                          ? "Показать опрос ещё раз"
+                          : "Показать опрос"}
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ))}
@@ -974,6 +1042,7 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                 {STEP_HINTS_ENABLED ? <th>Подсказки</th> : null}
                 <th>Статус</th>
                 <th>Разбор</th>
+                <th>Интерес</th>
                 <th>Активность</th>
               </tr>
             </thead>
@@ -1012,6 +1081,26 @@ export function TrainerLiveClient({ initialDetail }: { initialDetail: JamDetail 
                       </span>
                     ) : item.participant.status === "completed" ? (
                       <span className="pill">ждёт разбора</span>
+                    ) : (
+                      <span className="subtle">-</span>
+                    )}
+                  </td>
+                  <td>
+                    {item.participant.interestResponse ? (
+                      <span className="pill" style={{ color: interestTone[item.participant.interestResponse] }}>
+                        {interestLabel[item.participant.interestResponse]}
+                      </span>
+                    ) : item.participant.interestPromptOpenedAt ? (
+                      <span className="pill">ждём ответ</span>
+                    ) : item.participant.status === "completed" ? (
+                      <button
+                        className="button-secondary"
+                        style={{ fontSize: 12, padding: "3px 8px" }}
+                        disabled={interestPromptId === item.participant.id}
+                        onClick={() => void handleOpenInterestPrompt(item.participant.id)}
+                      >
+                        {interestPromptId === item.participant.id ? "..." : "Показать опрос"}
+                      </button>
                     ) : (
                       <span className="subtle">-</span>
                     )}

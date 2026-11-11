@@ -43,6 +43,7 @@ export default async function MissionPage({ params }: { params: Promise<{ partic
           version={version}
           initialProgress={progress}
           initialStepProgress={payload.stepProgress ?? []}
+          initialParticipant={payload.participant}
           participantId={participantId}
         />
       </main>

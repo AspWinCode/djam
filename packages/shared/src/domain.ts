@@ -155,6 +155,8 @@ export interface JamGame {
   orderIndex: number;
 }
 
+export type ParticipantInterest = "continue_learning" | "not_interested";
+
 export interface Participant {
   id: string;
   jamId: string;
@@ -163,6 +165,10 @@ export interface Participant {
   status: ParticipantStatus;
   joinedAt: string;
   lastSeenAt: string;
+  /** Trainer-triggered "want to keep learning?" prompt, shown once the child finishes a project. */
+  interestPromptOpenedAt?: string;
+  interestResponse?: ParticipantInterest;
+  interestRespondedAt?: string;
 }
 
 export interface TrainerParticipantNote {
@@ -401,6 +407,7 @@ export interface RealtimeEvent<T = unknown> {
     | "participant_requested_review"
     | "participant_requested_help"
     | "participant_completed_jam"
+    | "participant_interest_updated"
     | "trainer_resolved_help"
     | "session_snapshot"
     | "hint_request_pending"
@@ -417,6 +424,13 @@ export interface ParticipantProgressRealtimePayload {
 export interface ParticipantHelpRealtimePayload {
   participantId: string;
   stepId?: string;
+}
+
+export interface ParticipantInterestRealtimePayload {
+  participantId: string;
+  interestPromptOpenedAt?: string;
+  interestResponse?: ParticipantInterest;
+  interestRespondedAt?: string;
 }
 
 export interface SessionSnapshotRealtimePayload {

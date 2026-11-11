@@ -130,6 +130,19 @@ export class TrainerController {
     return { data: await this.appService.getParticipant(id, progressId) };
   }
 
+  @Post("participants/:id/interest-prompt")
+  async openInterestPrompt(@Req() request: AuthRequest, @Param("id") id: string) {
+    await this.requireParticipantAccess(request, id);
+    const participant = await this.appService.openInterestPrompt(id);
+    await this.auditLog.log({
+      action: "trainer.participant.open_interest_prompt",
+      ...this.auditLog.actorFromRequest(request),
+      targetType: "participant",
+      targetId: id
+    });
+    return { data: participant };
+  }
+
   @Post("participants/:id/resolve-help")
   async resolveHelp(@Req() request: AuthRequest, @Param("id") id: string) {
     await this.requireParticipantAccess(request, id);

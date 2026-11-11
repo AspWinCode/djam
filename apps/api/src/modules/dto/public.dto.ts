@@ -1,4 +1,4 @@
-import { IsString, MinLength } from "class-validator";
+import { IsIn, IsString, MinLength } from "class-validator";
 
 export class JoinSessionDtoClass {
   @IsString()
@@ -16,4 +16,9 @@ export class SelectJamDtoClass {
 }
 
 export { JoinSessionDtoClass as JoinJamDtoClass, SelectJamDtoClass as SelectGameDtoClass };
+
+export class SubmitInterestResponseDtoClass {
+  @IsIn(["continue_learning", "not_interested"])
+  response!: "continue_learning" | "not_interested";
+}
 

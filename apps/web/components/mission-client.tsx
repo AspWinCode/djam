@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Route } from "next";
-import type { GameStep, GameVersion, ParticipantProgress, ParticipantStepProgress, StepHint } from "@game-game/shared";
-import { completeParticipantStep, getParticipantProgress, requestParticipantHelp, requestParticipantHintOpen, requestParticipantReview } from "../lib/api";
+import type { GameStep, GameVersion, Participant, ParticipantProgress, ParticipantStepProgress, StepHint } from "@game-game/shared";
+import { completeParticipantStep, getParticipantProgress, requestParticipantHelp, requestParticipantHintOpen, requestParticipantReview, submitParticipantInterestResponse } from "../lib/api";
 import { ChildAttemptHistoryPanel } from "./child-attempt-history-panel";
 import { saveChildAttempt } from "./child-attempt-history";
 import { clearChildSession, readChildSession } from "./child-session-sync";
@@ -332,11 +332,13 @@ export function MissionClient({
   version,
   initialProgress,
   initialStepProgress,
+  initialParticipant,
   participantId
 }: {
   version: GameVersion;
   initialProgress: ParticipantProgress;
   initialStepProgress: ParticipantStepProgress[];
+  initialParticipant?: Participant;
   participantId: string;
 }) {
   const router = useRouter();
@@ -356,6 +358,9 @@ export function MissionClient({
   const [error, setError] = useState<string | null>(null);
   const [successStep, setSuccessStep] = useState<GameStep | null>(null);
   const [bonusActive, setBonusActive] = useState(false);
+  const [interestPromptOpenedAt, setInterestPromptOpenedAt] = useState(initialParticipant?.interestPromptOpenedAt);
+  const [interestResponse, setInterestResponse] = useState(initialParticipant?.interestResponse);
+  const [interestPending, setInterestPending] = useState(false);
   const [panelMode, setPanelMode] = useState<PanelMode>("split");
   const [editorLoaded, setEditorLoaded] = useState(false);
   const [leftWidth, setLeftWidth] = useState(380);
@@ -475,6 +480,39 @@ export function MissionClient({
     timer = setTimeout(() => void sync(), 10000);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [helpRequested, reviewRequestedAt, participantId, version]);
+
+  // The trainer opens the "want to keep learning?" prompt from their own panel, so once the
+  // child reaches the final screen we poll for it until an answer is given.
+  useEffect(() => {
+    if (!isCompleted || interestResponse) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const sync = async () => {
+      try {
+        const fresh = await getParticipantProgress(participantId);
+        if (!cancelled) {
+          setInterestPromptOpenedAt(fresh.participant.interestPromptOpenedAt);
+          setInterestResponse(fresh.participant.interestResponse);
+        }
+      } catch { /* Keep confirmed server state and retry on the next tick. */ }
+      finally { if (!cancelled) timer = setTimeout(() => void sync(), 8000); }
+    };
+    timer = setTimeout(() => void sync(), 8000);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [isCompleted, interestResponse, participantId]);
+
+  async function handleInterestResponse(response: "continue_learning" | "not_interested") {
+    if (interestPending) return;
+    setInterestPending(true);
+    try {
+      const participant = await submitParticipantInterestResponse(participantId, response);
+      setInterestResponse(participant.interestResponse);
+    } catch {
+      // The poll above will retry; the prompt simply stays open for another attempt.
+    } finally {
+      setInterestPending(false);
+    }
+  }
 
   async function handleRequestReview() {
     if (actionInFlight.current || reviewRequestedAt || reviewedAt) return;
@@ -1026,6 +1064,35 @@ export function MissionClient({
             <button className="button" onClick={() => setSuccessStep(null)} style={{ width: "100%", justifyContent: "center" }}>
               {successStep.isBonus ? (nextBonusStep ? "Продолжить →" : "Смотреть итог") : (requiredDone ? "Смотреть итог" : "Продолжить →")}
             </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── Interest prompt overlay — opened by the trainer once the child has finished ── */}
+      {!successStep && interestPromptOpenedAt && !interestResponse ? (
+        <div className="overlay" role="dialog" aria-modal="true">
+          <div className="card accent-card stack overlay-card card-bounce">
+            <div className="eyebrow">Твой тренер спрашивает</div>
+            <h2 className="section-title" style={{ fontSize: 24 }}>Хочешь заниматься дальше?</h2>
+            <p className="subtle">Делать свои собственные игры на следующих занятиях — это весело! Выбери, что тебе ближе.</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button
+                className="button"
+                disabled={interestPending}
+                onClick={() => void handleInterestResponse("continue_learning")}
+                style={{ width: "100%", justifyContent: "center" }}
+              >
+                🚀 Хочу заниматься дальше и создавать свои игры
+              </button>
+              <button
+                className="button-secondary"
+                disabled={interestPending}
+                onClick={() => void handleInterestResponse("not_interested")}
+                style={{ width: "100%", justifyContent: "center" }}
+              >
+                Пока не интересно
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

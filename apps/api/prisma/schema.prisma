@@ -40,6 +40,11 @@ enum StepProgressStatus {
   completed
 }
 
+enum ParticipantInterest {
+  continue_learning
+  not_interested
+}
+
 enum HintType {
   text
   image
@@ -345,6 +350,11 @@ model Participant {
   status      ParticipantStatus @default(active)
   joinedAt    DateTime          @default(now()) @map("joined_at")
   lastSeenAt  DateTime          @default(now()) @map("last_seen_at")
+
+  // Trainer-triggered "want to keep learning?" prompt, shown once the child finishes a project.
+  interestPromptOpenedAt DateTime?           @map("interest_prompt_opened_at")
+  interestResponse       ParticipantInterest? @map("interest_response")
+  interestRespondedAt    DateTime?           @map("interest_responded_at")
 
   jam          Jam                       @relation(fields: [jamId], references: [id], onDelete: Cascade)
   progress     ParticipantProgress[]
