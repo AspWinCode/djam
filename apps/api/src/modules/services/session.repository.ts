@@ -377,6 +377,9 @@ export class SessionRepository {
     status: "active" | "stuck" | "needs_help" | "completed" | "offline";
     joinedAt: Date;
     lastSeenAt: Date;
+    interestPromptOpenedAt?: Date | null;
+    interestResponse?: "continue_learning" | "not_interested" | null;
+    interestRespondedAt?: Date | null;
   }): Participant {
     return {
       id: participant.id,
@@ -385,7 +388,43 @@ export class SessionRepository {
       avatar: participant.avatar,
       status: participant.status,
       joinedAt: participant.joinedAt.toISOString(),
-      lastSeenAt: participant.lastSeenAt.toISOString()
+      lastSeenAt: participant.lastSeenAt.toISOString(),
+      interestPromptOpenedAt: participant.interestPromptOpenedAt?.toISOString(),
+      interestResponse: participant.interestResponse ?? undefined,
+      interestRespondedAt: participant.interestRespondedAt?.toISOString()
     };
+  }
+
+  /** Trainer opens the "want to keep learning?" prompt for one participant; re-opening clears any previous answer. */
+  async openInterestPrompt(participantId: string): Promise<Participant> {
+    const participant = await this.prisma.participant.update({
+      where: { id: participantId },
+      data: {
+        interestPromptOpenedAt: new Date(),
+        interestResponse: null,
+        interestRespondedAt: null
+      }
+    });
+    return this.toParticipant(participant);
+  }
+
+  /** Child answers an open prompt. Ignored once answered, so a slow double-tap can't flip the result. */
+  async submitInterestResponse(participantId: string, response: "continue_learning" | "not_interested"): Promise<Participant> {
+    const existing = await this.prisma.participant.findUnique({ where: { id: participantId } });
+    if (!existing) {
+      throw new NotFoundException("Participant not found");
+    }
+    if (!existing.interestPromptOpenedAt || existing.interestRespondedAt) {
+      return this.toParticipant(existing);
+    }
+
+    const participant = await this.prisma.participant.update({
+      where: { id: participantId },
+      data: {
+        interestResponse: response,
+        interestRespondedAt: new Date()
+      }
+    });
+    return this.toParticipant(participant);
   }
 }

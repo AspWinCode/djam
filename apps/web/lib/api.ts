@@ -618,3 +618,18 @@ export async function requestParticipantReview(participantId: string): Promise<P
     }
   });
 }
+
+export async function submitParticipantInterestResponse(
+  participantId: string,
+  response: "continue_learning" | "not_interested"
+): Promise<Participant> {
+  return postJson(`/public/participants/${participantId}/interest-response`, { response }, {
+    headers: {
+      "x-participant-id": participantId
+    }
+  });
+}
+
+export async function openParticipantInterestPrompt(participantId: string): Promise<Participant> {
+  return await postJson(`/trainer/participants/${participantId}/interest-prompt`);
+}

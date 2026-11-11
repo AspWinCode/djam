@@ -2,7 +2,7 @@ import { Body, Controller, Get, Headers, Param, Post, Req } from "@nestjs/common
 import { Throttle } from "@nestjs/throttler";
 import { ParticipantScoped } from "../../common/participant-scoped.decorator.js";
 import type { AuthRequest } from "../../common/auth.types.js";
-import { JoinJamDtoClass, SelectGameDtoClass } from "../dto/public.dto.js";
+import { JoinJamDtoClass, SelectGameDtoClass, SubmitInterestResponseDtoClass } from "../dto/public.dto.js";
 import { AuditLogService } from "../services/audit-log.service.js";
 import { AppService } from "../services/app.service.js";
 
@@ -62,6 +62,25 @@ export class PublicController {
   @ParticipantScoped()
   async requestReview(@Param("participantId") participantId: string) {
     return { data: await this.appService.requestReview(participantId) };
+  }
+
+  @Post("participants/:participantId/interest-response")
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ParticipantScoped()
+  async submitInterestResponse(
+    @Req() request: AuthRequest,
+    @Param("participantId") participantId: string,
+    @Body() body: SubmitInterestResponseDtoClass
+  ) {
+    const participant = await this.appService.submitInterestResponse(participantId, body.response);
+    await this.auditLog.log({
+      action: "public.participant.interest_response",
+      ...this.auditLog.participantActor(participantId, request),
+      targetType: "participant",
+      targetId: participantId,
+      metadata: { response: body.response }
+    });
+    return { data: participant };
   }
 
   @Get("progress/:participantId")

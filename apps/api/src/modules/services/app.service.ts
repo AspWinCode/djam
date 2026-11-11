@@ -380,6 +380,38 @@ export class AppService {
     return progress;
   }
 
+  async openInterestPrompt(participantId: string) {
+    const jamId = await this.sessionRepository.getParticipantJam(participantId);
+    const participant = await this.sessionRepository.openInterestPrompt(participantId);
+    this.emitToJam(jamId, {
+      type: "participant_interest_updated",
+      payload: {
+        participantId,
+        interestPromptOpenedAt: participant.interestPromptOpenedAt,
+        interestResponse: participant.interestResponse,
+        interestRespondedAt: participant.interestRespondedAt
+      },
+      emittedAt: nowIso()
+    });
+    return participant;
+  }
+
+  async submitInterestResponse(participantId: string, response: "continue_learning" | "not_interested") {
+    const jamId = await this.sessionRepository.getParticipantJam(participantId);
+    const participant = await this.sessionRepository.submitInterestResponse(participantId, response);
+    this.emitToJam(jamId, {
+      type: "participant_interest_updated",
+      payload: {
+        participantId,
+        interestPromptOpenedAt: participant.interestPromptOpenedAt,
+        interestResponse: participant.interestResponse,
+        interestRespondedAt: participant.interestRespondedAt
+      },
+      emittedAt: nowIso()
+    });
+    return participant;
+  }
+
   createTrainerParticipantNote(participantId: string, dto: CreateTrainerParticipantNoteDto, author: { id: string; displayName: string }) {
     return this.progressRepository.createTrainerParticipantNote(participantId, author, dto.body);
   }
